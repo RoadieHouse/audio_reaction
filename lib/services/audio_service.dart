@@ -19,6 +19,7 @@ import '../models/training_session.dart';
 /// background music (Spotify, Apple Music) without ever stopping it.
 class AudioService {
   final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _previewPlayer = AudioPlayer();
 
   // ── Public Streams ──────────────────────────────────────────────────────────
 
@@ -135,11 +136,31 @@ class AudioService {
     await _player.seek(Duration.zero, index: 0);
   }
 
+  /// Plays [cue] once for preview. Uses a separate player so the session
+  /// player is never interrupted. Any in-progress preview is stopped first.
+  Future<void> previewCue(AudioCue cue) async {
+    try {
+      await _previewPlayer.stop();
+      final source = _sourceForCue(cue);
+      await _previewPlayer.setAudioSource(source);
+      await _previewPlayer.play();
+    } catch (e) {
+      assert(() {
+        // ignore: avoid_print
+        print('[AudioService] previewCue() failed: $e');
+        return true;
+      }());
+    }
+  }
+
   // ── Disposal ────────────────────────────────────────────────────────────────
 
   /// Release OS audio resources. Call this when the service is no longer
   /// needed (e.g., in a [ChangeNotifier.dispose] override on the provider).
-  Future<void> dispose() async => _player.dispose();
+  Future<void> dispose() async {
+    await _player.dispose();
+    await _previewPlayer.dispose();
+  }
 
   // ── Private Helpers ─────────────────────────────────────────────────────────
 

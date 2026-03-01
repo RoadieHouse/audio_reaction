@@ -7,6 +7,7 @@ import '../data/default_sounds.dart';
 import '../models/audio_cue.dart';
 import '../models/training_session.dart';
 import '../models/sequence_block.dart';
+import '../services/storage_service.dart';
 
 /// Holds the complete application state for training sessions.
 ///
@@ -24,11 +25,15 @@ import '../models/sequence_block.dart';
 /// )
 /// ```
 class SessionProvider extends ChangeNotifier {
-  SessionProvider({List<TrainingSession>? initialSessions})
-      : _sessions = List<TrainingSession>.from(initialSessions ?? []);
+  SessionProvider({
+    required StorageService storage,
+    List<TrainingSession>? initialSessions,
+  })  : _storage = storage,
+        _sessions = List<TrainingSession>.from(initialSessions ?? []);
 
   // ── State ──────────────────────────────────────────────────────────────────
 
+  final StorageService _storage;
   final List<TrainingSession> _sessions;
   TrainingSession? _draftSession;
   List<AudioCue> _customSounds = [];
@@ -57,6 +62,7 @@ class SessionProvider extends ChangeNotifier {
   void addSession(TrainingSession session) {
     _sessions.add(session);
     notifyListeners();
+    _persist();
   }
 
   /// Replaces the session whose [TrainingSession.id] matches [updated.id].
@@ -66,13 +72,17 @@ class SessionProvider extends ChangeNotifier {
     if (index == -1) return;
     _sessions[index] = updated;
     notifyListeners();
+    _persist();
   }
 
   /// Removes the session with the given [id] from the saved list.
   void deleteSession(String id) {
     final lengthBefore = _sessions.length;
     _sessions.removeWhere((s) => s.id == id);
-    if (_sessions.length != lengthBefore) notifyListeners();
+    if (_sessions.length != lengthBefore) {
+      notifyListeners();
+      _persist();
+    }
   }
 
   // ── Draft Lifecycle ────────────────────────────────────────────────────────
@@ -166,6 +176,7 @@ class SessionProvider extends ChangeNotifier {
 
     _draftSession = null;
     notifyListeners();
+    _persist();
     return true;
   }
 
@@ -225,6 +236,17 @@ class SessionProvider extends ChangeNotifier {
   }
 
   // ── Private Helpers ────────────────────────────────────────────────────────
+
+  /// Fire-and-forget persistence. Logs errors in debug builds; never throws.
+  void _persist() {
+    _storage.saveSessions(List.unmodifiable(_sessions)).catchError((e) {
+      assert(() {
+        // ignore: avoid_print
+        print('[SessionProvider] _persist() failed: $e');
+        return true;
+      }());
+    });
+  }
 
   /// Generates a simple unique ID from the current timestamp (microseconds).
   ///

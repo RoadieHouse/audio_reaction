@@ -1,9 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/audio_cue.dart';
 import '../models/sequence_block.dart';
 import '../providers/session_provider.dart';
+import '../services/audio_service.dart';
+import '../services/recording_service.dart';
 
 /// Opens the sound-picker bottom sheet.
 ///
@@ -150,7 +154,7 @@ class _SoundList extends StatelessWidget {
                 Expanded(
                   child: Text(cue.name, style: theme.textTheme.titleMedium),
                 ),
-                // Preview play button — logic wired in future step
+                // Preview play button
                 SizedBox(
                   width: 40,
                   height: 40,
@@ -159,7 +163,8 @@ class _SoundList extends StatelessWidget {
                     icon: const Icon(Icons.play_circle_outline_rounded),
                     iconSize: 28,
                     color: theme.colorScheme.primary,
-                    onPressed: () {},
+                    onPressed: () =>
+                        context.read<AudioService>().previewCue(cue),
                     tooltip: 'Preview',
                   ),
                 ),
@@ -221,6 +226,7 @@ class _RecordButton extends StatefulWidget {
 
 class _RecordButtonState extends State<_RecordButton> {
   bool _isRecording = false;
+  String? _pendingFileName;
 
   @override
   Widget build(BuildContext context) {
@@ -239,8 +245,40 @@ class _RecordButtonState extends State<_RecordButton> {
           ),
           const SizedBox(height: 8),
           GestureDetector(
-            onLongPressStart: (_) => setState(() => _isRecording = true),
-            onLongPressEnd: (_) => setState(() => _isRecording = false),
+            onLongPressStart: (_) async {
+              final recorder = context.read<RecordingService>();
+              final granted = await recorder.requestPermission();
+              if (!granted) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Microphone permission denied.')),
+                  );
+                }
+                return;
+              }
+              _pendingFileName =
+                  'cue_${DateTime.now().millisecondsSinceEpoch}';
+              await recorder.startRecording(_pendingFileName!);
+              if (mounted) setState(() => _isRecording = true);
+            },
+            onLongPressEnd: (_) async {
+              final recorder = context.read<RecordingService>();
+              final filePath = await recorder.stopRecording();
+              if (mounted) setState(() => _isRecording = false);
+
+              if (filePath == null || !mounted) return;
+
+              final name = await _showNameDialog(
+                  context, _pendingFileName ?? 'New Cue');
+              if (name == null || !mounted) return;
+
+              await _renameRecording(filePath, name);
+
+              if (mounted) {
+                await context.read<SessionProvider>().loadCustomSounds();
+              }
+            },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               width: double.infinity,
@@ -284,6 +322,58 @@ class _RecordButtonState extends State<_RecordButton> {
         ],
       ),
     );
+  }
+
+  /// Shows an AlertDialog with a TextField. Returns the trimmed name the user
+  /// entered, or null if they cancelled or left the field empty.
+  Future<String?> _showNameDialog(
+      BuildContext context, String initial) async {
+    final controller = TextEditingController(text: initial);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Name your cue'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'e.g., Left, Right, Go',
+          ),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Discard'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return (result == null || result.isEmpty) ? null : result;
+  }
+
+  /// Renames the .m4a file on disk to the sanitised user-supplied [name].
+  /// If renaming fails the original file is kept and the error is swallowed.
+  Future<void> _renameRecording(String originalPath, String name) async {
+    try {
+      final original = File(originalPath);
+      final sanitised = name.replaceAll(RegExp(r'[^\w\-]'), '_');
+      final dir = original.parent.path;
+      final newPath = '$dir/$sanitised.m4a';
+      await original.rename(newPath);
+    } catch (e) {
+      assert(() {
+        // ignore: avoid_print
+        print('[RecordButton] rename failed: $e');
+        return true;
+      }());
+    }
   }
 }
 
