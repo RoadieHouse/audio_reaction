@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
-import '../data/dummy_data.dart';
+import 'package:provider/provider.dart';
+
+import '../models/training_session.dart';
+import '../providers/session_provider.dart';
+import '../services/audio_service.dart';
 import 'active_session_screen.dart';
 import 'create_session_screen.dart';
 
-/// Entry screen: shows a list of saved training sessions.
+/// Entry screen: shows the library of saved training sessions.
 /// Provides access to start (play) a session and create a new one.
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -14,15 +18,19 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Sprint React')),
-      body: kDummySessions.isEmpty
-          ? const _EmptyState()
-          : ListView.separated(
-              padding: const EdgeInsets.all(20),
-              itemCount: kDummySessions.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) =>
-                  _SessionTile(session: kDummySessions[index]),
-            ),
+      body: Consumer<SessionProvider>(
+        builder: (context, provider, _) {
+          final sessions = provider.sessions;
+          if (sessions.isEmpty) return const _EmptyState();
+          return ListView.separated(
+            padding: const EdgeInsets.all(20),
+            itemCount: sessions.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, index) =>
+                _SessionTile(session: sessions[index]),
+          );
+        },
+      ),
       floatingActionButton: _CreateSessionFab(),
     );
   }
@@ -33,7 +41,7 @@ class DashboardScreen extends StatelessWidget {
 class _SessionTile extends StatelessWidget {
   const _SessionTile({required this.session});
 
-  final DummySession session;
+  final TrainingSession session;
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +62,7 @@ class _SessionTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    session.name,
+                    session.title,
                     style: theme.textTheme.titleMedium,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -68,7 +76,10 @@ class _SessionTile extends StatelessWidget {
                         color: theme.textTheme.bodySmall?.color,
                       ),
                       const SizedBox(width: 4),
-                      Text(session.duration, style: theme.textTheme.bodySmall),
+                      Text(
+                        _formatDuration(session.totalDuration),
+                        style: theme.textTheme.bodySmall,
+                      ),
                       const SizedBox(width: 16),
                       Icon(
                         Icons.layers_outlined,
@@ -77,7 +88,7 @@ class _SessionTile extends StatelessWidget {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        '${session.blockCount} blocks',
+                        '${session.actionCount} actions',
                         style: theme.textTheme.bodySmall,
                       ),
                     ],
@@ -87,18 +98,14 @@ class _SessionTile extends StatelessWidget {
             ),
           ),
 
-          // ── Play Button (64×64 min target) ──────────────────────────────
+          // ── Play Button (64×64 tap target) ──────────────────────────────
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: SizedBox(
               width: 64,
               height: 64,
               child: IconButton(
-                onPressed: () => Navigator.pushNamed(
-                  context,
-                  ActiveSessionScreen.routeName,
-                  arguments: session,
-                ),
+                onPressed: () => _onPlay(context),
                 icon: Icon(
                   Icons.play_circle_filled_rounded,
                   color: theme.colorScheme.primary,
@@ -111,6 +118,32 @@ class _SessionTile extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Loads the session into the audio engine then navigates to the active
+  /// session screen. Navigation proceeds even if [AudioService.loadSession]
+  /// throws, so the active screen can handle the error state gracefully.
+  Future<void> _onPlay(BuildContext context) async {
+    try {
+      await context.read<AudioService>().loadSession(session);
+    } catch (_) {
+      // loadSession errors are logged inside AudioService; we still navigate.
+    }
+    if (context.mounted) {
+      Navigator.pushNamed(
+        context,
+        ActiveSessionScreen.routeName,
+        arguments: session,
+      );
+    }
+  }
+
+  String _formatDuration(Duration d) {
+    final m = d.inMinutes;
+    final s = d.inSeconds % 60;
+    if (m == 0) return '$s sec';
+    if (s == 0) return '$m min';
+    return '$m min $s sec';
   }
 }
 

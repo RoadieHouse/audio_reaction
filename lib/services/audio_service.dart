@@ -81,43 +81,36 @@ class AudioService {
 
   // ── Session Compiler ────────────────────────────────────────────────────────
 
-  /// Compiles [session] into a just_audio playlist and loads it into the
-  /// player, ready for an immediate [play] call.
+  /// Compiles [session] into a just_audio playlist and loads it, ready for
+  /// an immediate [play] call.
   ///
-  /// Sequence rules:
-  /// - [WarmUpBlock] → [SilenceAudioSource] of the block's duration.
-  /// - [DelayBlock]  → [SilenceAudioSource] of the block's duration.
-  /// - [ActionBlock] → one [AudioCue] chosen at random (or deterministically
-  ///   if only one cue exists), resolved to an [AudioSource] via [_sourceForCue].
+  /// Loop strategy:
+  /// - [TrainingSession.isInfinite] → build one pass, then engage
+  ///   [LoopMode.all] so just_audio repeats natively without duplicating
+  ///   sources. Safe under screen lock ([CORE-01]).
+  /// - Finite → unroll the sequence [TrainingSession.repeatCount] times into
+  ///   one flat [sources] list and set [LoopMode.off].
   ///
-  /// Loop blocks are not yet defined in the model; a comment marks where
-  /// unrolling logic will be inserted when they are added.
+  /// Cue selection per [ActionBlock] is randomised fresh on every call so
+  /// each training run is unpredictable.
   Future<void> loadSession(TrainingSession session) async {
     final rng = Random();
     final sources = <AudioSource>[];
 
-    for (final block in session.sequence) {
-      if (block is WarmUpBlock) {
-        // Silent gap — just_audio advances the playlist after the duration
-        // elapses, keeping timing accurate even under screen lock.
-        sources.add(SilenceAudioSource(duration: block.duration));
-      } else if (block is DelayBlock) {
-        sources.add(SilenceAudioSource(duration: block.duration));
-      } else if (block is ActionBlock) {
-        // Pick one cue from the pool; random when multiple cues are present.
-        final cue = block.pickCue(rng);
-        try {
-          sources.add(_sourceForCue(cue));
-        } catch (e) {
-          assert(() {
-            // ignore: avoid_print
-            print('[AudioService] Skipping cue "${cue.name}": $e');
-            return true;
-          }());
-          // Skip the bad cue rather than crashing the whole session load.
+    if (session.isInfinite) {
+      // One pass — LoopMode.all handles repetition inside the audio engine.
+      for (final block in session.sequence) {
+        _appendBlock(block, sources, rng);
+      }
+      await _player.setLoopMode(LoopMode.all);
+    } else {
+      // Mathematically unroll: repeat the sequence repeatCount times.
+      for (var i = 0; i < session.repeatCount; i++) {
+        for (final block in session.sequence) {
+          _appendBlock(block, sources, rng);
         }
       }
-      // TODO(future): LoopBlock — unroll repeat count and append child blocks.
+      await _player.setLoopMode(LoopMode.off);
     }
 
     await _player.setAudioSources(sources, preload: false);
@@ -142,6 +135,33 @@ class AudioService {
   Future<void> dispose() async => _player.dispose();
 
   // ── Private Helpers ─────────────────────────────────────────────────────────
+
+  /// Appends the correct [AudioSource] for [block] to [sources].
+  ///
+  /// Extracted so both the infinite (single-pass) and finite (unrolled) paths
+  /// in [loadSession] share identical block-handling logic.
+  void _appendBlock(SequenceBlock block, List<AudioSource> sources, Random rng) {
+    if (block is WarmUpBlock) {
+      // Silent gap — just_audio advances after the duration elapses, keeping
+      // timing accurate even under screen lock [CORE-01].
+      sources.add(SilenceAudioSource(duration: block.duration));
+    } else if (block is DelayBlock) {
+      sources.add(SilenceAudioSource(duration: block.duration));
+    } else if (block is ActionBlock) {
+      // Random cue selection — unpredictable per run.
+      final cue = block.pickCue(rng);
+      try {
+        sources.add(_sourceForCue(cue));
+      } catch (e) {
+        assert(() {
+          // ignore: avoid_print
+          print('[AudioService] Skipping cue "${cue.name}": $e');
+          return true;
+        }());
+        // Skip the bad cue; a missing file should not abort the whole session.
+      }
+    }
+  }
 
   /// Resolves an [AudioCue] to a just_audio [AudioSource].
   ///

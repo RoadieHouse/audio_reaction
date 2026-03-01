@@ -139,10 +139,7 @@ class _BlockRow extends StatelessWidget {
     if (block is ActionBlock) {
       return ActionCard(
         block: block,
-        onAddSound: () => showSoundPickerBottomSheet(
-          context,
-          onSoundSelected: (_) {}, // wired to Provider in a future step
-        ),
+        onAddSound: () => showSoundPickerBottomSheet(context),
       );
     }
     return const SizedBox.shrink();
@@ -179,10 +176,7 @@ class _BottomActionRow extends StatelessWidget {
           // Add Action — opens SoundPickerBottomSheet
           Expanded(
             child: ElevatedButton.icon(
-              onPressed: () => showSoundPickerBottomSheet(
-                context,
-                onSoundSelected: (_) {}, // wired to Provider in a future step
-              ),
+              onPressed: () => showSoundPickerBottomSheet(context),
               icon: const Icon(Icons.add_rounded),
               label: const Text('Add Action'),
             ),

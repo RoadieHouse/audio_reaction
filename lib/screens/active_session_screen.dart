@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../data/dummy_data.dart';
+import '../models/training_session.dart';
 
 /// Distraction-free active session screen.
 /// Features a screen-filling countdown timer, phase indicator, and controls.
@@ -13,7 +13,7 @@ class ActiveSessionScreen extends StatelessWidget {
 
   static const routeName = '/active';
 
-  final DummySession? session;
+  final TrainingSession? session;
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +24,7 @@ class ActiveSessionScreen extends StatelessWidget {
         child: Column(
           children: [
             // ── Top Bar (back + session name) ────────────────────────────
-            _TopBar(sessionName: session?.name ?? 'Session'),
+            _TopBar(sessionName: session?.title ?? 'Session'),
 
             // ── Timer ────────────────────────────────────────────────────
             const Expanded(child: _TimerDisplay()),

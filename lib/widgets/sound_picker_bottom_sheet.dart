@@ -1,30 +1,42 @@
 import 'package:flutter/material.dart';
-import '../data/dummy_data.dart';
+import 'package:provider/provider.dart';
 
-/// A reusable modal bottom sheet for picking or recording audio cues.
+import '../models/audio_cue.dart';
+import '../models/sequence_block.dart';
+import '../providers/session_provider.dart';
+
+/// Opens the sound-picker bottom sheet.
 ///
-/// Usage:
-/// ```dart
-/// showSoundPickerBottomSheet(context, onSoundSelected: (sound) { ... });
-/// ```
-void showSoundPickerBottomSheet(
-  BuildContext context, {
-  required ValueChanged<DummySound> onSoundSelected,
-}) {
+/// The sheet reads [SessionProvider] from context directly.
+/// When the user selects a cue, a new [ActionBlock] is appended to the draft
+/// via [SessionProvider.addBlockToDraft] and the sheet closes automatically.
+void showSoundPickerBottomSheet(BuildContext context) {
   showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => _SoundPickerSheet(onSoundSelected: onSoundSelected),
+    builder: (_) => const _SoundPickerSheet(),
   );
 }
 
 // ── Private Sheet Widget ──────────────────────────────────────────────────────
 
-class _SoundPickerSheet extends StatelessWidget {
-  const _SoundPickerSheet({required this.onSoundSelected});
+class _SoundPickerSheet extends StatefulWidget {
+  const _SoundPickerSheet();
 
-  final ValueChanged<DummySound> onSoundSelected;
+  @override
+  State<_SoundPickerSheet> createState() => _SoundPickerSheetState();
+}
+
+class _SoundPickerSheetState extends State<_SoundPickerSheet> {
+  @override
+  void initState() {
+    super.initState();
+    // Refresh the custom recordings list each time the sheet opens.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<SessionProvider>().loadCustomSounds();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,10 +52,8 @@ class _SoundPickerSheet extends StatelessWidget {
         ),
         child: Column(
           children: [
-            // ── Drag Handle ───────────────────────────────────────────────
             _DragHandle(),
 
-            // ── Title Row ─────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
               child: Row(
@@ -53,7 +63,6 @@ class _SoundPickerSheet extends StatelessWidget {
               ),
             ),
 
-            // ── Tab Bar ───────────────────────────────────────────────────
             TabBar(
               tabs: const [
                 Tab(text: 'Default Sounds'),
@@ -62,57 +71,66 @@ class _SoundPickerSheet extends StatelessWidget {
               labelStyle: const TextStyle(fontWeight: FontWeight.bold),
             ),
 
-            // ── Tab Views ─────────────────────────────────────────────────
             Expanded(
-              child: TabBarView(
-                children: [
-                  _SoundList(
-                    sounds: kDefaultSounds,
-                    onSelected: onSoundSelected,
-                  ),
-                  _SoundList(
-                    sounds: kMyRecordings,
-                    onSelected: onSoundSelected,
-                  ),
-                ],
+              child: Consumer<SessionProvider>(
+                builder: (context, provider, _) => TabBarView(
+                  children: [
+                    _SoundList(
+                      cues: provider.availableDefaultSounds,
+                      onSelected: (cue) => _onCueSelected(context, cue),
+                    ),
+                    _RecordingsTab(
+                      cues: provider.availableCustomSounds,
+                      onSelected: (cue) => _onCueSelected(context, cue),
+                    ),
+                  ],
+                ),
               ),
             ),
 
-            // ── Record Button ─────────────────────────────────────────────
             _RecordButton(),
-
-            // Bottom safe area padding
             SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
           ],
         ),
       ),
     );
   }
+
+  void _onCueSelected(BuildContext context, AudioCue cue) {
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    context.read<SessionProvider>().addBlockToDraft(
+          ActionBlock(id: id, audioCues: [cue]),
+        );
+    Navigator.of(context).pop();
+  }
 }
 
 // ── Sound List ────────────────────────────────────────────────────────────────
 
 class _SoundList extends StatelessWidget {
-  const _SoundList({required this.sounds, required this.onSelected});
+  const _SoundList({required this.cues, required this.onSelected});
 
-  final List<DummySound> sounds;
-  final ValueChanged<DummySound> onSelected;
+  final List<AudioCue> cues;
+  final ValueChanged<AudioCue> onSelected;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    if (cues.isEmpty) {
+      return Center(
+        child: Text('No sounds available', style: theme.textTheme.bodySmall),
+      );
+    }
+
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      itemCount: sounds.length,
+      itemCount: cues.length,
       separatorBuilder: (_, __) => const SizedBox(height: 4),
       itemBuilder: (_, index) {
-        final sound = sounds[index];
+        final cue = cues[index];
         return InkWell(
-          onTap: () {
-            onSelected(sound);
-            Navigator.of(context).pop();
-          },
+          onTap: () => onSelected(cue),
           borderRadius: BorderRadius.circular(12),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -130,11 +148,9 @@ class _SoundList extends StatelessWidget {
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: Text(sound.name, style: theme.textTheme.titleMedium),
+                  child: Text(cue.name, style: theme.textTheme.titleMedium),
                 ),
-                Text(sound.duration, style: theme.textTheme.bodySmall),
-                const SizedBox(width: 12),
-                // Preview play button
+                // Preview play button — logic wired in future step
                 SizedBox(
                   width: 40,
                   height: 40,
@@ -143,7 +159,7 @@ class _SoundList extends StatelessWidget {
                     icon: const Icon(Icons.play_circle_outline_rounded),
                     iconSize: 28,
                     color: theme.colorScheme.primary,
-                    onPressed: () {}, // dummy
+                    onPressed: () {},
                     tooltip: 'Preview',
                   ),
                 ),
@@ -153,6 +169,46 @@ class _SoundList extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+// ── Recordings Tab ────────────────────────────────────────────────────────────
+
+/// My Recordings tab — shows custom .m4a files, or an empty state with a
+/// hint to use the record button below when none exist yet.
+class _RecordingsTab extends StatelessWidget {
+  const _RecordingsTab({required this.cues, required this.onSelected});
+
+  final List<AudioCue> cues;
+  final ValueChanged<AudioCue> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    if (cues.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.mic_none_rounded,
+              size: 48,
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.4),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'No recordings yet',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Hold the button below to record a cue.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      );
+    }
+    return _SoundList(cues: cues, onSelected: onSelected);
   }
 }
 
@@ -177,13 +233,11 @@ class _RecordButtonState extends State<_RecordButton> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Hint text
           Text(
             'Hold to record a custom cue',
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 8),
-          // Hold-to-record button
           GestureDetector(
             onLongPressStart: (_) => setState(() => _isRecording = true),
             onLongPressEnd: (_) => setState(() => _isRecording = false),

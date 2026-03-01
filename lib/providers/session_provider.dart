@@ -1,4 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
+
+import '../data/default_sounds.dart';
+import '../models/audio_cue.dart';
 import '../models/training_session.dart';
 import '../models/sequence_block.dart';
 
@@ -25,6 +31,7 @@ class SessionProvider extends ChangeNotifier {
 
   final List<TrainingSession> _sessions;
   TrainingSession? _draftSession;
+  List<AudioCue> _customSounds = [];
 
   // ── Public Getters ─────────────────────────────────────────────────────────
 
@@ -37,6 +44,12 @@ class SessionProvider extends ChangeNotifier {
 
   /// Whether a draft is currently active.
   bool get hasDraft => _draftSession != null;
+
+  /// The full list of bundled default sounds from [kDefaultAudioCues].
+  List<AudioCue> get availableDefaultSounds => kDefaultAudioCues;
+
+  /// Custom recordings discovered by the most recent [loadCustomSounds] call.
+  List<AudioCue> get availableCustomSounds => List.unmodifiable(_customSounds);
 
   // ── Session CRUD ───────────────────────────────────────────────────────────
 
@@ -162,6 +175,53 @@ class SessionProvider extends ChangeNotifier {
     if (_draftSession == null) return;
     _draftSession = null;
     notifyListeners();
+  }
+
+  // ── Sound Discovery ────────────────────────────────────────────────────────
+
+  /// Scans `<app-documents>/recordings/` for `.m4a` files saved by
+  /// [RecordingService] and rebuilds [availableCustomSounds].
+  ///
+  /// Call this when the sound picker opens or after a new recording is saved.
+  Future<void> loadCustomSounds() async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final recordingsDir = Directory('${appDir.path}/recordings');
+
+      if (!recordingsDir.existsSync()) {
+        _customSounds = [];
+        notifyListeners();
+        return;
+      }
+
+      final files = recordingsDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.m4a'))
+          .toList()
+        ..sort((a, b) => a.path.compareTo(b.path));
+
+      _customSounds = files.map((f) {
+        final fileName = f.uri.pathSegments.last; // e.g. "my_cue.m4a"
+        final displayName = fileName
+            .replaceAll('_', ' ')
+            .replaceAll('.m4a', '');
+        return AudioCue(
+          id: fileName, // filename is a stable, unique ID
+          name: displayName,
+          filePath: f.path,
+          isCustom: true,
+        );
+      }).toList();
+
+      notifyListeners();
+    } catch (e) {
+      assert(() {
+        // ignore: avoid_print
+        print('[SessionProvider] loadCustomSounds() failed: $e');
+        return true;
+      }());
+    }
   }
 
   // ── Private Helpers ────────────────────────────────────────────────────────
