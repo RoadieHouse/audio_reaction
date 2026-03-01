@@ -31,6 +31,13 @@ class AudioService {
   /// know which [SequenceBlock] is active.
   Stream<int?> get currentIndexStream => _player.currentIndexStream;
 
+  /// Whether the player is currently playing (not paused, not stopped).
+  Stream<bool> get playingStream => _player.playingStream;
+
+  /// Full player state including ProcessingState (idle, loading, buffering,
+  /// ready, completed). Use to detect when a finite session ends.
+  Stream<PlayerState> get playerStateStream => _player.playerStateStream;
+
   // ── Initialisation ──────────────────────────────────────────────────────────
 
   /// Configures the OS audio session so cues mix with background music.

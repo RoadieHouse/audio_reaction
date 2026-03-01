@@ -1,5 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:provider/provider.dart';
+
+import '../models/sequence_block.dart';
 import '../models/training_session.dart';
+import '../services/audio_service.dart';
+
+// ── Phase label helper ────────────────────────────────────────────────────────
+
+String _phaseLabel(SequenceBlock block) {
+  if (block is WarmUpBlock) return 'WARM UP';
+  if (block is DelayBlock) return 'DELAY';
+  if (block is ActionBlock) {
+    return block.audioCues.isNotEmpty
+        ? block.audioCues.first.name.toUpperCase()
+        : 'ACTION';
+  }
+  return '';
+}
 
 /// Distraction-free active session screen.
 /// Features a screen-filling countdown timer, phase indicator, and controls.
@@ -8,7 +28,7 @@ import '../models/training_session.dart';
 /// Timer/Future.delayed (these are suspended when screen locks). A
 /// background-safe approach (e.g., pre-built audio playlist with silent gaps)
 /// must be used. This screen is a visual prototype only.
-class ActiveSessionScreen extends StatelessWidget {
+class ActiveSessionScreen extends StatefulWidget {
   const ActiveSessionScreen({super.key, this.session});
 
   static const routeName = '/active';
@@ -16,29 +36,81 @@ class ActiveSessionScreen extends StatelessWidget {
   final TrainingSession? session;
 
   @override
+  State<ActiveSessionScreen> createState() => _ActiveSessionScreenState();
+}
+
+class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
+  late final AudioService _audio;
+  late final StreamSubscription<PlayerState> _stateSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _audio = context.read<AudioService>();
+    _stateSub = _audio.playerStateStream.listen((state) {
+      if (state.processingState == ProcessingState.completed) {
+        _audio.stop();
+        if (mounted) Navigator.of(context).pop();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _stateSub.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // Pure black — maximum contrast for outdoor visibility
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // ── Top Bar (back + session name) ────────────────────────────
-            _TopBar(sessionName: session?.title ?? 'Session'),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, _) async {
+        if (didPop) return;
+        await _audio.stop();
+        if (mounted) Navigator.of(context).pop();
+      },
+      child: Scaffold(
+        // Pure black — maximum contrast for outdoor visibility
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Column(
+            children: [
+              // ── Top Bar (back + session name) ──────────────────────────
+              _TopBar(sessionName: widget.session?.title ?? 'Session'),
 
-            // ── Timer ────────────────────────────────────────────────────
-            const Expanded(child: _TimerDisplay()),
+              // ── Timer ──────────────────────────────────────────────────
+              Expanded(
+                child: StreamBuilder<Duration>(
+                  stream: _audio.positionStream,
+                  initialData: Duration.zero,
+                  builder: (_, snap) =>
+                      _TimerDisplay(elapsed: snap.data ?? Duration.zero),
+                ),
+              ),
 
-            // ── Phase Label ──────────────────────────────────────────────
-            const _PhaseLabel(phase: 'SPRINTING'),
+              // ── Phase Label ────────────────────────────────────────────
+              StreamBuilder<int?>(
+                stream: _audio.currentIndexStream,
+                initialData: 0,
+                builder: (_, snap) {
+                  final blocks = widget.session?.sequence ?? const [];
+                  final idx = snap.data ?? 0;
+                  final label = blocks.isEmpty
+                      ? ''
+                      : _phaseLabel(blocks[idx % blocks.length]);
+                  return _PhaseLabel(phase: label);
+                },
+              ),
 
-            const SizedBox(height: 32),
+              const SizedBox(height: 32),
 
-            // ── Controls ─────────────────────────────────────────────────
-            const _SessionControls(),
+              // ── Controls ───────────────────────────────────────────────
+              _SessionControls(audio: _audio),
 
-            const SizedBox(height: 40),
-          ],
+              const SizedBox(height: 40),
+            ],
+          ),
         ),
       ),
     );
@@ -89,7 +161,15 @@ class _TopBar extends StatelessWidget {
 // ── Timer Display ─────────────────────────────────────────────────────────────
 
 class _TimerDisplay extends StatelessWidget {
-  const _TimerDisplay();
+  const _TimerDisplay({required this.elapsed});
+
+  final Duration elapsed;
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -100,7 +180,7 @@ class _TimerDisplay extends StatelessWidget {
       child: FittedBox(
         fit: BoxFit.contain,
         child: Text(
-          '00:45',
+          _fmt(elapsed),
           style: theme.textTheme.displayLarge?.copyWith(
             // Explicit enormous base size — FittedBox scales it to fill the space
             fontSize: 200,
@@ -127,25 +207,41 @@ class _PhaseLabel extends StatelessWidget {
 // ── Session Controls ──────────────────────────────────────────────────────────
 
 class _SessionControls extends StatelessWidget {
-  const _SessionControls();
+  const _SessionControls({required this.audio});
+
+  final AudioService audio;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        // Pause Button
-        _LargeControlButton(
-          icon: Icons.pause_circle_rounded,
-          label: 'Pause',
-          onPressed: () {}, // dummy
+        // Pause/Resume Button — driven by playingStream
+        StreamBuilder<bool>(
+          stream: audio.playingStream,
+          initialData: true,
+          builder: (context, snap) {
+            final isPlaying = snap.data ?? true;
+            return _LargeControlButton(
+              icon: isPlaying
+                  ? Icons.pause_circle_rounded
+                  : Icons.play_circle_rounded,
+              label: isPlaying ? 'Pause' : 'Resume',
+              onPressed: isPlaying
+                  ? () => audio.pause()
+                  : () => audio.play(),
+            );
+          },
         ),
 
         // Stop Button
         _LargeControlButton(
           icon: Icons.stop_circle_rounded,
           label: 'Stop',
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () async {
+            await audio.stop();
+            if (context.mounted) Navigator.of(context).pop();
+          },
           color: Colors.redAccent,
         ),
       ],
@@ -194,3 +290,4 @@ class _LargeControlButton extends StatelessWidget {
     );
   }
 }
+

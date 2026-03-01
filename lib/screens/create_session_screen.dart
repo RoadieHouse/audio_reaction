@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-import '../models/audio_cue.dart';
 import '../models/sequence_block.dart';
+import '../providers/session_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/blocks/block_cards.dart';
 import '../widgets/sound_picker_bottom_sheet.dart';
@@ -14,17 +15,63 @@ class CreateSessionScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Create Session')),
-      body: const _CreateSessionBody(),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (bool didPop, _) {
+        if (didPop) context.read<SessionProvider>().discardDraft();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Create Session'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                final saved = context.read<SessionProvider>().saveDraft();
+                if (saved) {
+                  Navigator.pop(context);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Please enter a session name.')),
+                  );
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+        body: const _CreateSessionBody(),
+      ),
     );
   }
 }
 
 // ── Body ──────────────────────────────────────────────────────────────────────
 
-class _CreateSessionBody extends StatelessWidget {
+class _CreateSessionBody extends StatefulWidget {
   const _CreateSessionBody();
+
+  @override
+  State<_CreateSessionBody> createState() => _CreateSessionBodyState();
+}
+
+class _CreateSessionBodyState extends State<_CreateSessionBody> {
+  late final TextEditingController _titleController;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<SessionProvider>().startNewDraft();
+    });
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +81,9 @@ class _CreateSessionBody extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
           child: TextField(
+            controller: _titleController,
+            onChanged: (v) =>
+                context.read<SessionProvider>().updateDraftTitle(v),
             style: Theme.of(context).textTheme.titleMedium,
             decoration: const InputDecoration(
               labelText: 'Session Name',
@@ -44,7 +94,12 @@ class _CreateSessionBody extends StatelessWidget {
         ),
 
         // ── Block Timeline ─────────────────────────────────────────────
-        const Expanded(child: _BlockTimeline()),
+        Expanded(
+          child: _BlockTimeline(
+            blocks: context.watch<SessionProvider>().draftSession?.sequence ??
+                const [],
+          ),
+        ),
 
         // ── Bottom Action Row ──────────────────────────────────────────
         _BottomActionRow(),
@@ -56,37 +111,26 @@ class _CreateSessionBody extends StatelessWidget {
 // ── Block Timeline ────────────────────────────────────────────────────────────
 
 class _BlockTimeline extends StatelessWidget {
-  const _BlockTimeline();
+  const _BlockTimeline({required this.blocks});
 
-  // Prototype sequence — replaced by SessionProvider.draftSession.sequence
-  // when the Provider is wired in a future step.
-  static final List<SequenceBlock> _demoBlocks = [
-    const WarmUpBlock(id: 'b1', duration: Duration(seconds: 60)),
-    ActionBlock(
-      id: 'b2',
-      audioCues: [
-        AudioCue(id: 's1', name: 'Beep High', filePath: 'assets/sounds/beep_high.mp3', isCustom: false),
-        AudioCue(id: 's2', name: 'Beep Low',  filePath: 'assets/sounds/beep_low.mp3',  isCustom: false),
-      ],
-    ),
-    const DelayBlock(id: 'b3', duration: Duration(seconds: 3)),
-    ActionBlock(
-      id: 'b4',
-      audioCues: [
-        AudioCue(id: 'r1', name: 'Voice: Left', filePath: null, isCustom: true),
-      ],
-    ),
-    const DelayBlock(id: 'b5', duration: Duration(seconds: 2)),
-  ];
+  final List<SequenceBlock> blocks;
 
   @override
   Widget build(BuildContext context) {
+    if (blocks.isEmpty) {
+      return const Center(
+        child: Text(
+          "Tap 'Add Action' or 'Add Delay' to build your session.",
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      itemCount: _demoBlocks.length,
+      itemCount: blocks.length,
       itemBuilder: (context, index) => _BlockRow(
-        block: _demoBlocks[index],
-        isLast: index == _demoBlocks.length - 1,
+        block: blocks[index],
+        isLast: index == blocks.length - 1,
       ),
     );
   }
@@ -187,7 +231,14 @@ class _BottomActionRow extends StatelessWidget {
           // Add Delay
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: () {}, // dummy
+              onPressed: () {
+                context.read<SessionProvider>().addBlockToDraft(
+                      DelayBlock(
+                        id: DateTime.now().microsecondsSinceEpoch.toString(),
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+              },
               icon: const Icon(Icons.hourglass_empty_rounded),
               label: const Text('Add Delay'),
             ),
