@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -196,6 +198,7 @@ class _DurationField extends StatefulWidget {
 
 class _DurationFieldState extends State<_DurationField> {
   late final TextEditingController _controller;
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -217,6 +220,7 @@ class _DurationFieldState extends State<_DurationField> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -236,7 +240,12 @@ class _DurationFieldState extends State<_DurationField> {
       ),
       onChanged: (value) {
         final seconds = int.tryParse(value);
-        if (seconds != null && seconds > 0) widget.onChanged?.call(seconds);
+        if (seconds != null && seconds > 0) {
+          _debounce?.cancel();
+          _debounce = Timer(const Duration(milliseconds: 300), () {
+            widget.onChanged?.call(seconds);
+          });
+        }
       },
     );
   }

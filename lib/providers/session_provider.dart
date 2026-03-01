@@ -29,7 +29,9 @@ class SessionProvider extends ChangeNotifier {
     required StorageService storage,
     List<TrainingSession>? initialSessions,
   })  : _storage = storage,
-        _sessions = List<TrainingSession>.from(initialSessions ?? []);
+        _sessions = List<TrainingSession>.from(initialSessions ?? []) {
+    _sessionsView = List.unmodifiable(_sessions);
+  }
 
   // ── State ──────────────────────────────────────────────────────────────────
 
@@ -38,10 +40,20 @@ class SessionProvider extends ChangeNotifier {
   TrainingSession? _draftSession;
   List<AudioCue> _customSounds = [];
 
+  // Cached unmodifiable views — rebuilt immediately before notifyListeners()
+  // in every method that mutates _sessions or _customSounds so callers never
+  // pay the List.unmodifiable() allocation on every getter access.
+  List<TrainingSession> _sessionsView = const [];
+  List<AudioCue> _customSoundsView = const [];
+
+  // Cached recordings directory — resolved once on first loadCustomSounds()
+  // call so getApplicationDocumentsDirectory() is never called twice.
+  Directory? _recordingsDir;
+
   // ── Public Getters ─────────────────────────────────────────────────────────
 
   /// Immutable view of the saved sessions list.
-  List<TrainingSession> get sessions => List.unmodifiable(_sessions);
+  List<TrainingSession> get sessions => _sessionsView;
 
   /// The session currently being built in CreateSessionScreen, or null if
   /// no draft is in progress.
@@ -54,13 +66,14 @@ class SessionProvider extends ChangeNotifier {
   List<AudioCue> get availableDefaultSounds => kDefaultAudioCues;
 
   /// Custom recordings discovered by the most recent [loadCustomSounds] call.
-  List<AudioCue> get availableCustomSounds => List.unmodifiable(_customSounds);
+  List<AudioCue> get availableCustomSounds => _customSoundsView;
 
   // ── Session CRUD ───────────────────────────────────────────────────────────
 
   /// Appends [session] to the saved sessions list.
   void addSession(TrainingSession session) {
     _sessions.add(session);
+    _sessionsView = List.unmodifiable(_sessions);
     notifyListeners();
     _persist();
   }
@@ -71,6 +84,7 @@ class SessionProvider extends ChangeNotifier {
     final index = _sessions.indexWhere((s) => s.id == updated.id);
     if (index == -1) return;
     _sessions[index] = updated;
+    _sessionsView = List.unmodifiable(_sessions);
     notifyListeners();
     _persist();
   }
@@ -80,6 +94,7 @@ class SessionProvider extends ChangeNotifier {
     final lengthBefore = _sessions.length;
     _sessions.removeWhere((s) => s.id == id);
     if (_sessions.length != lengthBefore) {
+      _sessionsView = List.unmodifiable(_sessions);
       notifyListeners();
       _persist();
     }
@@ -235,6 +250,7 @@ class SessionProvider extends ChangeNotifier {
     }
 
     _draftSession = null;
+    _sessionsView = List.unmodifiable(_sessions);
     notifyListeners();
     _persist();
     return true;
@@ -256,11 +272,13 @@ class SessionProvider extends ChangeNotifier {
   /// Call this when the sound picker opens or after a new recording is saved.
   Future<void> loadCustomSounds() async {
     try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final recordingsDir = Directory('${appDir.path}/recordings');
+      _recordingsDir ??= Directory(
+          '${(await getApplicationDocumentsDirectory()).path}/recordings');
+      final recordingsDir = _recordingsDir!;
 
       if (!recordingsDir.existsSync()) {
         _customSounds = [];
+        _customSoundsView = const [];
         notifyListeners();
         return;
       }
@@ -285,6 +303,7 @@ class SessionProvider extends ChangeNotifier {
         );
       }).toList();
 
+      _customSoundsView = List.unmodifiable(_customSounds);
       notifyListeners();
     } catch (e) {
       assert(() {

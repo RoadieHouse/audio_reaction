@@ -121,14 +121,44 @@ class _CreateSessionBodyState extends State<_CreateSessionBody> {
 
 // ── Block Timeline ────────────────────────────────────────────────────────────
 
-class _BlockTimeline extends StatelessWidget {
+class _BlockTimeline extends StatefulWidget {
   const _BlockTimeline({required this.blocks});
 
   final List<SequenceBlock> blocks;
 
   @override
+  State<_BlockTimeline> createState() => _BlockTimelineState();
+}
+
+class _BlockTimelineState extends State<_BlockTimeline> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void didUpdateWidget(_BlockTimeline oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Scroll to the newly added block after it has been laid out.
+    if (widget.blocks.length > oldWidget.blocks.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (blocks.isEmpty) {
+    if (widget.blocks.isEmpty) {
       return const Center(
         child: Text(
           "Tap 'Add Action' or 'Add Delay' to build your session.",
@@ -137,12 +167,13 @@ class _BlockTimeline extends StatelessWidget {
       );
     }
     return ListView.builder(
+      controller: _scrollController,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      itemCount: blocks.length,
+      itemCount: widget.blocks.length,
       itemBuilder: (context, index) => _BlockRow(
-        key: ValueKey(blocks[index].id),
-        block: blocks[index],
-        isLast: index == blocks.length - 1,
+        key: ValueKey(widget.blocks[index].id),
+        block: widget.blocks[index],
+        isLast: index == widget.blocks.length - 1,
       ),
     );
   }

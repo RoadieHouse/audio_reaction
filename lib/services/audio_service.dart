@@ -11,24 +11,24 @@ import '../models/training_session.dart';
 
 // ── Background isolate helper ─────────────────────────────────────────────────
 
-/// Builds a flat list of plain source descriptors from a serialised session.
-/// Runs in a background isolate via [compute] so the main thread is never
-/// blocked by the playlist-construction loop.
+/// Builds warm-up and loop source descriptors for exactly ONE pass each.
+/// Runs in a background isolate via [compute].
 ///
-/// Structure:
-///   1. Warm-up sources  — played exactly once, before the loop.
-///   2. Loop sources     — repeated [repeatCount] times (or 999 for infinite).
+/// Returns a [Map] with:
+///   'warmup'      — List of warmup descriptors (played once before any loop)
+///   'loop'        — List of loop descriptors for one pass
+///   'repeatCount' — int
+///   'isInfinite'  — bool
 ///
-/// Returns a list of Maps with keys:
+/// Each descriptor Map has keys:
 ///   'type'       → 'silence' | 'asset' | 'file'
 ///   'durationMs' → int (silence only)
 ///   'path'       → String (asset / file only)
 ///   'blockIndex' → int? (index into session.sequence; null for 300 ms gaps)
-List<Map<String, dynamic>> _buildSourceDescriptors(
+Map<String, dynamic> _buildSourceDescriptors(
     Map<String, dynamic> sessionJson) {
   final session = TrainingSession.fromJson(sessionJson);
   final rng = Random();
-  final descriptors = <Map<String, dynamic>>[];
 
   // Build a lookup: block.id → index in session.sequence
   final blockIndexById = <String, int>{};
@@ -37,60 +37,85 @@ List<Map<String, dynamic>> _buildSourceDescriptors(
   }
 
   // Split the sequence: leading WarmUpBlocks play once, everything else loops.
-  final warmUpBlocks =
-      session.sequence.whereType<WarmUpBlock>().toList();
-  final loopBlocks = session.sequence
-      .where((b) => b is! WarmUpBlock)
-      .toList();
+  final warmUpBlocks = session.sequence.whereType<WarmUpBlock>().toList();
+  final loopBlocks =
+      session.sequence.where((b) => b is! WarmUpBlock).toList();
 
-  // ── Step 1: Warm-up (once, not repeated) ─────────────────────────────────
+  // ── Warm-up (once, not repeated) ─────────────────────────────────────────
+  final warmupDescriptors = <Map<String, dynamic>>[];
   for (final block in warmUpBlocks) {
-    descriptors.add({
+    warmupDescriptors.add({
       'type': 'silence',
       'durationMs': block.duration.inMilliseconds,
       'blockIndex': blockIndexById[block.id],
     });
   }
 
-  // ── Step 2: Loop passes ───────────────────────────────────────────────────
-  // For "infinite" sessions we unroll 999 passes rather than using
-  // LoopMode.all, because LoopMode.all would also loop the warm-up.
-  final passes = session.isInfinite ? 999 : session.repeatCount;
+  // ── ONE pass of loop blocks ───────────────────────────────────────────────
+  final loopDescriptors = <Map<String, dynamic>>[];
+  for (var i = 0; i < loopBlocks.length; i++) {
+    final block = loopBlocks[i];
+    final isLastBlock = i == loopBlocks.length - 1;
 
-  for (var pass = 0; pass < passes; pass++) {
-    for (var i = 0; i < loopBlocks.length; i++) {
-      final block = loopBlocks[i];
-      final isLastBlock = (pass == passes - 1) && (i == loopBlocks.length - 1);
-
-      if (block is DelayBlock) {
-        descriptors.add({
-          'type': 'silence',
-          'durationMs': block.duration.inMilliseconds,
+    if (block is DelayBlock) {
+      loopDescriptors.add({
+        'type': 'silence',
+        'durationMs': block.duration.inMilliseconds,
+        'blockIndex': blockIndexById[block.id],
+      });
+    } else if (block is ActionBlock) {
+      final cue = block.pickCue(rng);
+      final path = cue.filePath;
+      if (path != null && path.isNotEmpty) {
+        loopDescriptors.add({
+          'type': cue.isCustom ? 'file' : 'asset',
+          'path': path,
           'blockIndex': blockIndexById[block.id],
         });
-      } else if (block is ActionBlock) {
-        final cue = block.pickCue(rng);
-        final path = cue.filePath;
-        if (path != null && path.isNotEmpty) {
-          descriptors.add({
-            'type': cue.isCustom ? 'file' : 'asset',
-            'path': path,
-            'blockIndex': blockIndexById[block.id],
+        // 300 ms gap prevents back-to-back cues sounding like one sound.
+        if (!isLastBlock) {
+          loopDescriptors.add({
+            'type': 'silence',
+            'durationMs': 300,
+            'blockIndex': null, // inter-cue gap, not a named block
           });
-          // 300 ms gap prevents back-to-back cues sounding like one sound.
-          if (!isLastBlock) {
-            descriptors.add({
-              'type': 'silence',
-              'durationMs': 300,
-              'blockIndex': null, // inter-cue gap, not a named block
-            });
-          }
         }
       }
     }
   }
 
-  return descriptors;
+  return {
+    'warmup': warmupDescriptors,
+    'loop': loopDescriptors,
+    'repeatCount': session.repeatCount,
+    'isInfinite': session.isInfinite,
+  };
+}
+
+/// Converts a list of source descriptor maps into parallel lists of
+/// [AudioSource] objects, block-index mappings, and audio-item flags.
+({List<AudioSource> sources, List<int?> indexMap, List<bool> audioMap})
+    _convertDescriptors(List<Map<String, dynamic>> descs) {
+  final sources = <AudioSource>[];
+  final indexMap = <int?>[];
+  final audioMap = <bool>[];
+  for (final d in descs) {
+    final type = d['type'] as String;
+    if (type == 'silence') {
+      sources.add(SilenceAudioSource(
+        duration: Duration(milliseconds: d['durationMs'] as int),
+      ));
+      audioMap.add(false);
+    } else if (type == 'asset') {
+      sources.add(AudioSource.asset(d['path'] as String));
+      audioMap.add(true);
+    } else if (type == 'file') {
+      sources.add(AudioSource.uri(Uri.file(d['path'] as String)));
+      audioMap.add(true);
+    }
+    indexMap.add(d['blockIndex'] as int?);
+  }
+  return (sources: sources, indexMap: indexMap, audioMap: audioMap);
 }
 
 /// Owns the [AudioPlayer] and manages the full lifecycle of a training
@@ -128,6 +153,11 @@ class AudioService {
 
   /// Subscription to preview player state; releases audio focus on completion.
   StreamSubscription<PlayerState>? _previewStateSub;
+
+  /// Completer that resolves when [init] has finished configuring the OS audio
+  /// session. [loadSession] awaits this to guard against the rare fast-launch
+  /// race where the user taps play before audio-session setup has completed.
+  final Completer<void> _initCompleter = Completer<void>();
 
   // ── Public Streams ──────────────────────────────────────────────────────────
 
@@ -203,6 +233,10 @@ class AudioService {
         print('[AudioService] init() failed: $e');
         return true;
       }());
+    } finally {
+      // Mark init as complete regardless of success/failure so loadSession()
+      // is never blocked indefinitely by a failed audio-session handshake.
+      if (!_initCompleter.isCompleted) _initCompleter.complete();
     }
   }
 
@@ -213,38 +247,57 @@ class AudioService {
   ///
   /// The heavy descriptor-building work runs in a background isolate via
   /// [compute] to avoid blocking the main thread ([CORE-01]).
-  /// Descriptors are converted to [AudioSource] objects on the main isolate
-  /// after [compute] returns, then loaded with [preload: true] so buffering
-  /// completes before [play] is called.
+  ///
+  /// One pass of sources is built regardless of [TrainingSession.repeatCount].
+  /// Looping is handled natively:
+  ///   • infinite or repeatCount > 20 → [LoopMode.all] on one-pass playlist
+  ///     (playlist stays small; warm-up will also repeat, an acceptable
+  ///     trade-off at very high repeat counts).
+  ///   • repeatCount ≤ 20 → [LoopMode.off] with the loop pass duplicated
+  ///     inline (bounded source count; warm-up plays exactly once).
   Future<void> loadSession(TrainingSession session) async {
+    // Wait for init() to finish so the OS audio session is configured before
+    // playback begins. No-op in the normal case (init completes in ~50ms,
+    // well before the user can navigate to and tap play on a session).
+    if (!_initCompleter.isCompleted) await _initCompleter.future;
+
     // Ensure the player is idle before loading new sources to avoid
-    // ExoPlayer's internal operation queue deadlocking on setAudioSources.
+    // ExoPlayer's internal operation queue deadlocking.
     await _player.stop();
 
-    final descriptors =
-        await compute(_buildSourceDescriptors, session.toJson());
+    final result = await compute(_buildSourceDescriptors, session.toJson());
 
-    final sources = <AudioSource>[];
-    final indexMap = <int?>[];
-    final audioMap = <bool>[];
-    for (final d in descriptors) {
-      final type = d['type'] as String;
-      if (type == 'silence') {
-        sources.add(SilenceAudioSource(
-          duration: Duration(milliseconds: d['durationMs'] as int),
-        ));
-        audioMap.add(false);
-      } else if (type == 'asset') {
-        sources.add(AudioSource.asset(d['path'] as String));
-        audioMap.add(true);
-      } else if (type == 'file') {
-        sources.add(AudioSource.uri(Uri.file(d['path'] as String)));
-        audioMap.add(true);
-      }
-      indexMap.add(d['blockIndex'] as int?);
+    final warmupDescs =
+        (result['warmup'] as List).cast<Map<String, dynamic>>();
+    final loopDescs = (result['loop'] as List).cast<Map<String, dynamic>>();
+    final repeatCount = result['repeatCount'] as int;
+    final isInfinite = result['isInfinite'] as bool;
+
+    final warmup = _convertDescriptors(warmupDescs);
+    final loop = _convertDescriptors(loopDescs);
+
+    // For infinite or large repeat counts, loop natively (LoopMode.all).
+    // The playlist index wraps back to 0 each iteration, so the one-pass
+    // blockIndexMap and isAudioItem arrays remain valid indefinitely.
+    //
+    // For small repeat counts, unroll loop passes inline (LoopMode.off) so
+    // the warm-up plays exactly once and audio-focus management is correct
+    // across all passes without any modular index arithmetic.
+    final useNativeLoop = isInfinite || repeatCount > 20;
+
+    if (useNativeLoop) {
+      _blockIndexMap = [...warmup.indexMap, ...loop.indexMap];
+      _isAudioItem = [...warmup.audioMap, ...loop.audioMap];
+    } else {
+      _blockIndexMap = [
+        ...warmup.indexMap,
+        for (var i = 0; i < repeatCount; i++) ...loop.indexMap,
+      ];
+      _isAudioItem = [
+        ...warmup.audioMap,
+        for (var i = 0; i < repeatCount; i++) ...loop.audioMap,
+      ];
     }
-    _blockIndexMap = indexMap;
-    _isAudioItem = audioMap;
 
     // Cancel any previous focus subscription before setting up a new one.
     await _indexSub?.cancel();
@@ -254,11 +307,18 @@ class AudioService {
       _audioSession?.setActive(isAudio);
     });
 
-    await _player.setLoopMode(LoopMode.off);
+    final allSources = useNativeLoop
+        ? [...warmup.sources, ...loop.sources]
+        : [
+            ...warmup.sources,
+            for (var i = 0; i < repeatCount; i++) ...loop.sources,
+          ];
+
+    await _player.setLoopMode(useNativeLoop ? LoopMode.all : LoopMode.off);
     // preload: false — player is ready immediately; ExoPlayer buffers ahead
-    // naturally during playback instead of trying to preload thousands of
-    // items upfront (which would hang for an infinite/999-pass session).
-    await _player.setAudioSources(sources, preload: false);
+    // naturally during playback. The playlist is now small (one pass) so
+    // setAudioSources resolves quickly regardless of session length.
+    await _player.setAudioSources(allSources, preload: false);
   }
 
   // ── Playback Controls ───────────────────────────────────────────────────────

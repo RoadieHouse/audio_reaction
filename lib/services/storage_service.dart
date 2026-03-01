@@ -14,6 +14,16 @@ import '../models/training_session.dart';
 class StorageService {
   static const String _sessionsKey = 'saved_sessions';
 
+  SharedPreferences? _prefs;
+
+  /// Returns the cached [SharedPreferences] instance, fetching it once on
+  /// first access. Subsequent calls return the already-resolved instance
+  /// without a platform-channel round-trip.
+  Future<SharedPreferences> get _sharedPrefs async {
+    _prefs ??= await SharedPreferences.getInstance();
+    return _prefs!;
+  }
+
   // ── Write ───────────────────────────────────────────────────────────────────
 
   /// Serialises [sessions] to JSON and writes it to persistent storage.
@@ -22,7 +32,7 @@ class StorageService {
   /// Throws on unexpected I/O errors so the Provider layer can surface them.
   Future<void> saveSessions(List<TrainingSession> sessions) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await _sharedPrefs;
       final jsonList = sessions.map((s) => s.toJson()).toList();
       final encoded = jsonEncode(jsonList);
       await prefs.setString(_sessionsKey, encoded);
@@ -40,7 +50,7 @@ class StorageService {
   /// when the stored data cannot be decoded (corrupt/stale data).
   Future<List<TrainingSession>> loadSessions() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await _sharedPrefs;
       final encoded = prefs.getString(_sessionsKey);
 
       if (encoded == null || encoded.isEmpty) return [];

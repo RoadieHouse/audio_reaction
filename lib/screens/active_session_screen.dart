@@ -42,7 +42,6 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   late final AudioService _audio;
   late final StreamSubscription<PlayerState> _stateSub;
   bool _didExit = false;
-  bool _loading = true;
 
   /// Single exit point for all navigation-away paths.
   /// Guards against duplicate pops from simultaneous stream events.
@@ -61,8 +60,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
 
     // Subscribe to completion BEFORE loading so no event is missed.
     _stateSub = _audio.playerStateStream.listen((state) {
-      // Only respond to completion once fully loaded and playing.
-      if (!_loading && state.processingState == ProcessingState.completed) {
+      if (state.processingState == ProcessingState.completed) {
         _guardedExit();
       }
     });
@@ -75,24 +73,20 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       return;
     }
 
-    // Load playlist and start playback after the first frame renders so the
-    // loading overlay is visible before any heavy work begins.
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
+    // Fire-and-forget: screen renders immediately; audio starts as soon as
+    // the player is ready (near-instant with a small one-pass playlist).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      try {
-        await _audio.loadSession(widget.session!);
-        if (!mounted) return;
-        await _audio.play();
-      } catch (e) {
+      _audio.loadSession(widget.session!).then((_) {
+        if (mounted) _audio.play();
+      }).catchError((Object e) {
         assert(() {
           // ignore: avoid_print
           print('[ActiveSession] load/play failed: $e');
           return true;
         }());
-        _guardedExit();
-      } finally {
-        if (mounted) setState(() => _loading = false);
-      }
+        if (mounted) _guardedExit();
+      });
     });
   }
 
@@ -176,30 +170,6 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                   const SizedBox(height: 40),
                 ],
               ),
-
-              // ── Loading overlay (shown while playlist buffers) ───────────
-              if (_loading)
-                Container(
-                  color: Colors.black,
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const CircularProgressIndicator(),
-                        const SizedBox(height: 20),
-                        Text(
-                          'Loading session…',
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          widget.session?.title ?? '',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
             ],
           ),
         ),
