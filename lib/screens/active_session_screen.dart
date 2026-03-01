@@ -42,6 +42,17 @@ class ActiveSessionScreen extends StatefulWidget {
 class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   late final AudioService _audio;
   late final StreamSubscription<PlayerState> _stateSub;
+  bool _didExit = false;
+
+  /// Single exit point for all navigation-away paths.
+  /// Guards against duplicate pops from simultaneous stream events.
+  void _guardedExit() {
+    if (_didExit) return;
+    _didExit = true;
+    _audio.stop().then((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
 
   @override
   void initState() {
@@ -49,8 +60,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
     _audio = context.read<AudioService>();
     _stateSub = _audio.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed) {
-        _audio.stop();
-        if (mounted) Navigator.of(context).pop();
+        _guardedExit();
       }
     });
   }
@@ -65,10 +75,9 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (bool didPop, _) async {
+      onPopInvokedWithResult: (bool didPop, _) {
         if (didPop) return;
-        await _audio.stop();
-        if (mounted) Navigator.of(context).pop();
+        _guardedExit();
       },
       child: Scaffold(
         // Pure black — maximum contrast for outdoor visibility
@@ -106,7 +115,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
               const SizedBox(height: 32),
 
               // ── Controls ───────────────────────────────────────────────
-              _SessionControls(audio: _audio),
+              _SessionControls(audio: _audio, onStop: _guardedExit),
 
               const SizedBox(height: 40),
             ],
@@ -207,9 +216,10 @@ class _PhaseLabel extends StatelessWidget {
 // ── Session Controls ──────────────────────────────────────────────────────────
 
 class _SessionControls extends StatelessWidget {
-  const _SessionControls({required this.audio});
+  const _SessionControls({required this.audio, required this.onStop});
 
   final AudioService audio;
+  final VoidCallback onStop;
 
   @override
   Widget build(BuildContext context) {
@@ -234,14 +244,11 @@ class _SessionControls extends StatelessWidget {
           },
         ),
 
-        // Stop Button
+        // Stop Button — uses the single guarded exit path
         _LargeControlButton(
           icon: Icons.stop_circle_rounded,
           label: 'Stop',
-          onPressed: () async {
-            await audio.stop();
-            if (context.mounted) Navigator.of(context).pop();
-          },
+          onPressed: onStop,
           color: Colors.redAccent,
         ),
       ],

@@ -63,7 +63,14 @@ class _CreateSessionBodyState extends State<_CreateSessionBody> {
     super.initState();
     _titleController = TextEditingController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<SessionProvider>().startNewDraft();
+      if (!mounted) return;
+      final provider = context.read<SessionProvider>();
+      if (provider.hasDraft) {
+        // Editing an existing session — pre-fill the title, do NOT reset draft.
+        _titleController.text = provider.draftSession?.title ?? '';
+      } else {
+        provider.startNewDraft();
+      }
     });
   }
 
@@ -92,6 +99,9 @@ class _CreateSessionBodyState extends State<_CreateSessionBody> {
             ),
           ),
         ),
+
+        // ── Loop Controls ──────────────────────────────────────────────
+        const _LoopControlsRow(),
 
         // ── Block Timeline ─────────────────────────────────────────────
         Expanded(
@@ -178,12 +188,15 @@ class _BlockRow extends StatelessWidget {
   }
 
   Widget _cardFor(BuildContext context, SequenceBlock block) {
-    if (block is WarmUpBlock) return WarmUpCard(block: block);
-    if (block is DelayBlock)  return DelayCard(block: block);
+    void onDelete() =>
+        context.read<SessionProvider>().removeBlockFromDraft(block.id);
+    if (block is WarmUpBlock) return WarmUpCard(block: block, onDelete: onDelete);
+    if (block is DelayBlock)  return DelayCard(block: block, onDelete: onDelete);
     if (block is ActionBlock) {
       return ActionCard(
         block: block,
         onAddSound: () => showSoundPickerBottomSheet(context),
+        onDelete: onDelete,
       );
     }
     return const SizedBox.shrink();
@@ -197,7 +210,84 @@ class _BlockRow extends StatelessWidget {
   }
 }
 
-// ── Bottom Action Row ─────────────────────────────────────────────────────────
+// ── Loop Controls Row ─────────────────────────────────────────────────────────
+
+class _LoopControlsRow extends StatelessWidget {
+  const _LoopControlsRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<SessionProvider>(
+      builder: (context, provider, _) {
+        final isInfinite = provider.draftSession?.isInfinite ?? false;
+        final repeatCount = provider.draftSession?.repeatCount ?? 1;
+        final theme = Theme.of(context);
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+          child: Row(
+            children: [
+              Icon(Icons.loop_rounded,
+                  size: 18, color: theme.textTheme.bodySmall?.color),
+              const SizedBox(width: 8),
+              Text('Loop', style: theme.textTheme.bodyMedium),
+              const Spacer(),
+              Text('∞', style: theme.textTheme.bodyMedium),
+              Switch(
+                value: isInfinite,
+                onChanged: (v) => context
+                    .read<SessionProvider>()
+                    .updateDraftIsInfinite(v),
+              ),
+              const SizedBox(width: 8),
+              // Decrement
+              SizedBox(
+                width: 36,
+                height: 36,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  icon: const Icon(Icons.remove_rounded, size: 20),
+                  onPressed: isInfinite
+                      ? null
+                      : () => context
+                          .read<SessionProvider>()
+                          .updateDraftRepeatCount(repeatCount - 1),
+                ),
+              ),
+              SizedBox(
+                width: 36,
+                child: Text(
+                  '$repeatCount×',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: isInfinite
+                        ? theme.disabledColor
+                        : theme.colorScheme.onSurface,
+                  ),
+                ),
+              ),
+              // Increment
+              SizedBox(
+                width: 36,
+                height: 36,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  icon: const Icon(Icons.add_rounded, size: 20),
+                  onPressed: isInfinite
+                      ? null
+                      : () => context
+                          .read<SessionProvider>()
+                          .updateDraftRepeatCount(repeatCount + 1),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 
 class _BottomActionRow extends StatelessWidget {
   @override

@@ -115,6 +115,20 @@ class SessionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Updates the draft's repeat count. Clamped to [1, 99].
+  void updateDraftRepeatCount(int count) {
+    if (_draftSession == null) return;
+    _draftSession = _draftSession!.copyWith(repeatCount: count.clamp(1, 99));
+    notifyListeners();
+  }
+
+  /// Updates the draft's infinite loop flag.
+  void updateDraftIsInfinite(bool value) {
+    if (_draftSession == null) return;
+    _draftSession = _draftSession!.copyWith(isInfinite: value);
+    notifyListeners();
+  }
+
   /// Appends [block] to the end of the draft's sequence.
   void addBlockToDraft(SequenceBlock block) {
     if (_draftSession == null) return;

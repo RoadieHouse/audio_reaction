@@ -38,104 +38,173 @@ class DashboardScreen extends StatelessWidget {
 
 // ── Session Tile ──────────────────────────────────────────────────────────────
 
-class _SessionTile extends StatelessWidget {
+class _SessionTile extends StatefulWidget {
   const _SessionTile({required this.session});
 
   final TrainingSession session;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+  State<_SessionTile> createState() => _SessionTileState();
+}
 
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          // ── Text content ────────────────────────────────────────────────
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    session.title,
-                    style: theme.textTheme.titleMedium,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.timer_outlined,
-                        size: 14,
-                        color: theme.textTheme.bodySmall?.color,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        _formatDuration(session.totalDuration),
-                        style: theme.textTheme.bodySmall,
-                      ),
-                      const SizedBox(width: 16),
-                      Icon(
-                        Icons.layers_outlined,
-                        size: 14,
-                        color: theme.textTheme.bodySmall?.color,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${session.actionCount} actions',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+class _SessionTileState extends State<_SessionTile> {
+  bool _loading = false;
+
+  // FIX 1+2: debounce + call play() after loadSession().
+  Future<void> _onPlay(BuildContext context) async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    try {
+      final audio = context.read<AudioService>();
+      await audio.loadSession(widget.session);
+      await audio.play();
+    } catch (_) {
+      // Errors are logged inside AudioService; navigate anyway.
+    }
+    if (!mounted) return;
+    setState(() => _loading = false);
+    Navigator.pushNamed(
+      context,
+      ActiveSessionScreen.routeName,
+      arguments: widget.session,
+    );
+  }
+
+  // FIX 5: tap text area to edit.
+  void _onEdit(BuildContext context) {
+    context.read<SessionProvider>().editExistingSession(widget.session);
+    Navigator.pushNamed(context, CreateSessionScreen.routeName);
+  }
+
+  // FIX 5: swipe-to-delete with confirmation.
+  Future<bool> _confirmDelete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete session?'),
+        content: Text(
+            'Delete "${widget.session.title}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
           ),
-
-          // ── Play Button (64×64 tap target) ──────────────────────────────
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: SizedBox(
-              width: 64,
-              height: 64,
-              child: IconButton(
-                onPressed: () => _onPlay(context),
-                icon: Icon(
-                  Icons.play_circle_filled_rounded,
-                  color: theme.colorScheme.primary,
-                  size: 40,
-                ),
-                tooltip: 'Start Session',
-              ),
-            ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
+    return confirmed ?? false;
   }
 
-  /// Loads the session into the audio engine then navigates to the active
-  /// session screen. Navigation proceeds even if [AudioService.loadSession]
-  /// throws, so the active screen can handle the error state gracefully.
-  Future<void> _onPlay(BuildContext context) async {
-    try {
-      await context.read<AudioService>().loadSession(session);
-    } catch (_) {
-      // loadSession errors are logged inside AudioService; we still navigate.
-    }
-    if (context.mounted) {
-      Navigator.pushNamed(
-        context,
-        ActiveSessionScreen.routeName,
-        arguments: session,
-      );
-    }
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Dismissible(
+      key: ValueKey(widget.session.id),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) => _confirmDelete(context),
+      onDismissed: (_) =>
+          context.read<SessionProvider>().deleteSession(widget.session.id),
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: Colors.redAccent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.delete_outline_rounded,
+            color: Colors.white, size: 28),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            // ── Text content (tappable → edit) ──────────────────────────
+            Expanded(
+              child: GestureDetector(
+                onTap: () => _onEdit(context),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.session.title,
+                        style: theme.textTheme.titleMedium,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.timer_outlined,
+                            size: 14,
+                            color: theme.textTheme.bodySmall?.color,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _formatDuration(widget.session.totalDuration),
+                            style: theme.textTheme.bodySmall,
+                          ),
+                          const SizedBox(width: 16),
+                          Icon(
+                            Icons.layers_outlined,
+                            size: 14,
+                            color: theme.textTheme.bodySmall?.color,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${widget.session.actionCount} actions',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // ── Play Button / Loading Indicator (64×64 tap target) ───────
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: SizedBox(
+                width: 64,
+                height: 64,
+                child: _loading
+                    ? const Center(
+                        child: SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        ),
+                      )
+                    : IconButton(
+                        onPressed: () => _onPlay(context),
+                        icon: Icon(
+                          Icons.play_circle_filled_rounded,
+                          color: theme.colorScheme.primary,
+                          size: 40,
+                        ),
+                        tooltip: 'Start Session',
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   String _formatDuration(Duration d) {

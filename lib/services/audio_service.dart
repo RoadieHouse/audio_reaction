@@ -1,11 +1,65 @@
 import 'dart:math';
 
 import 'package:audio_session/audio_session.dart';
+import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../models/audio_cue.dart';
 import '../models/sequence_block.dart';
 import '../models/training_session.dart';
+
+// ── Background isolate helper ─────────────────────────────────────────────────
+
+/// Builds a flat list of plain source descriptors from a serialised session.
+/// Runs in a background isolate via [compute] so the main thread is never
+/// blocked by the playlist-construction loop.
+///
+/// Returns a list of Maps with keys:
+///   'type'       → 'silence' | 'asset' | 'file'
+///   'durationMs' → int (silence only)
+///   'path'       → String (asset / file only)
+List<Map<String, dynamic>> _buildSourceDescriptors(
+    Map<String, dynamic> sessionJson) {
+  final session = TrainingSession.fromJson(sessionJson);
+  final rng = Random();
+  final descriptors = <Map<String, dynamic>>[];
+  final passes = session.isInfinite ? 1 : session.repeatCount;
+
+  for (var pass = 0; pass < passes; pass++) {
+    final blocks = session.sequence;
+    for (var i = 0; i < blocks.length; i++) {
+      final block = blocks[i];
+      final isLastBlock = (pass == passes - 1) && (i == blocks.length - 1);
+
+      if (block is WarmUpBlock) {
+        descriptors.add({
+          'type': 'silence',
+          'durationMs': block.duration.inMilliseconds,
+        });
+      } else if (block is DelayBlock) {
+        descriptors.add({
+          'type': 'silence',
+          'durationMs': block.duration.inMilliseconds,
+        });
+      } else if (block is ActionBlock) {
+        final cue = block.pickCue(rng);
+        final path = cue.filePath;
+        if (path != null && path.isNotEmpty) {
+          descriptors.add({
+            'type': cue.isCustom ? 'file' : 'asset',
+            'path': path,
+          });
+          // 300 ms gap prevents back-to-back cues sounding like one sound.
+          if (!isLastBlock) {
+            descriptors.add({'type': 'silence', 'durationMs': 300});
+          }
+        }
+      }
+    }
+  }
+
+  return descriptors;
+}
 
 /// Owns the [AudioPlayer] and manages the full lifecycle of a training
 /// session's audio: OS session configuration, playlist compilation, and
@@ -92,36 +146,32 @@ class AudioService {
   /// Compiles [session] into a just_audio playlist and loads it, ready for
   /// an immediate [play] call.
   ///
-  /// Loop strategy:
-  /// - [TrainingSession.isInfinite] → build one pass, then engage
-  ///   [LoopMode.all] so just_audio repeats natively without duplicating
-  ///   sources. Safe under screen lock ([CORE-01]).
-  /// - Finite → unroll the sequence [TrainingSession.repeatCount] times into
-  ///   one flat [sources] list and set [LoopMode.off].
-  ///
-  /// Cue selection per [ActionBlock] is randomised fresh on every call so
-  /// each training run is unpredictable.
+  /// The heavy descriptor-building work runs in a background isolate via
+  /// [compute] to avoid blocking the main thread ([CORE-01]).
+  /// Descriptors are converted to [AudioSource] objects on the main isolate
+  /// after [compute] returns, then loaded with [preload: true] so buffering
+  /// completes before [play] is called.
   Future<void> loadSession(TrainingSession session) async {
-    final rng = Random();
-    final sources = <AudioSource>[];
+    final descriptors =
+        await compute(_buildSourceDescriptors, session.toJson());
 
-    if (session.isInfinite) {
-      // One pass — LoopMode.all handles repetition inside the audio engine.
-      for (final block in session.sequence) {
-        _appendBlock(block, sources, rng);
+    final sources = <AudioSource>[];
+    for (final d in descriptors) {
+      final type = d['type'] as String;
+      if (type == 'silence') {
+        sources.add(SilenceAudioSource(
+          duration: Duration(milliseconds: d['durationMs'] as int),
+        ));
+      } else if (type == 'asset') {
+        sources.add(AudioSource.asset(d['path'] as String));
+      } else if (type == 'file') {
+        sources.add(AudioSource.uri(Uri.file(d['path'] as String)));
       }
-      await _player.setLoopMode(LoopMode.all);
-    } else {
-      // Mathematically unroll: repeat the sequence repeatCount times.
-      for (var i = 0; i < session.repeatCount; i++) {
-        for (final block in session.sequence) {
-          _appendBlock(block, sources, rng);
-        }
-      }
-      await _player.setLoopMode(LoopMode.off);
     }
 
-    await _player.setAudioSources(sources, preload: false);
+    await _player.setLoopMode(
+        session.isInfinite ? LoopMode.all : LoopMode.off);
+    await _player.setAudioSources(sources, preload: true);
   }
 
   // ── Playback Controls ───────────────────────────────────────────────────────
@@ -163,33 +213,6 @@ class AudioService {
   }
 
   // ── Private Helpers ─────────────────────────────────────────────────────────
-
-  /// Appends the correct [AudioSource] for [block] to [sources].
-  ///
-  /// Extracted so both the infinite (single-pass) and finite (unrolled) paths
-  /// in [loadSession] share identical block-handling logic.
-  void _appendBlock(SequenceBlock block, List<AudioSource> sources, Random rng) {
-    if (block is WarmUpBlock) {
-      // Silent gap — just_audio advances after the duration elapses, keeping
-      // timing accurate even under screen lock [CORE-01].
-      sources.add(SilenceAudioSource(duration: block.duration));
-    } else if (block is DelayBlock) {
-      sources.add(SilenceAudioSource(duration: block.duration));
-    } else if (block is ActionBlock) {
-      // Random cue selection — unpredictable per run.
-      final cue = block.pickCue(rng);
-      try {
-        sources.add(_sourceForCue(cue));
-      } catch (e) {
-        assert(() {
-          // ignore: avoid_print
-          print('[AudioService] Skipping cue "${cue.name}": $e');
-          return true;
-        }());
-        // Skip the bad cue; a missing file should not abort the whole session.
-      }
-    }
-  }
 
   /// Resolves an [AudioCue] to a just_audio [AudioSource].
   ///
