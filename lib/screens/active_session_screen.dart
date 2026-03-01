@@ -24,10 +24,9 @@ String _phaseLabel(SequenceBlock block) {
 /// Distraction-free active session screen.
 /// Features a screen-filling countdown timer, phase indicator, and controls.
 ///
-/// [CORE-01] NOTE: In production, the timer logic must NOT use Dart's
-/// Timer/Future.delayed (these are suspended when screen locks). A
-/// background-safe approach (e.g., pre-built audio playlist with silent gaps)
-/// must be used. This screen is a visual prototype only.
+/// [CORE-01]: All timing is handled by just_audio natively via SilenceAudioSource
+/// playlist items — no Dart Timer/Future.delayed used, so playback survives
+/// screen lock and backgrounding on both iOS and Android.
 class ActiveSessionScreen extends StatefulWidget {
   const ActiveSessionScreen({super.key, this.session});
 
@@ -43,6 +42,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   late final AudioService _audio;
   late final StreamSubscription<PlayerState> _stateSub;
   bool _didExit = false;
+  bool _loading = true;
 
   /// Single exit point for all navigation-away paths.
   /// Guards against duplicate pops from simultaneous stream events.
@@ -58,9 +58,40 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   void initState() {
     super.initState();
     _audio = context.read<AudioService>();
+
+    // Subscribe to completion BEFORE loading so no event is missed.
     _stateSub = _audio.playerStateStream.listen((state) {
-      if (state.processingState == ProcessingState.completed) {
+      // Only respond to completion once fully loaded and playing.
+      if (!_loading && state.processingState == ProcessingState.completed) {
         _guardedExit();
+      }
+    });
+
+    // Guard: pop immediately if no session was passed.
+    if (widget.session == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).pop();
+      });
+      return;
+    }
+
+    // Load playlist and start playback after the first frame renders so the
+    // loading overlay is visible before any heavy work begins.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      try {
+        await _audio.loadSession(widget.session!);
+        if (!mounted) return;
+        await _audio.play();
+      } catch (e) {
+        assert(() {
+          // ignore: avoid_print
+          print('[ActiveSession] load/play failed: $e');
+          return true;
+        }());
+        _guardedExit();
+      } finally {
+        if (mounted) setState(() => _loading = false);
       }
     });
   }
@@ -83,41 +114,92 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         // Pure black — maximum contrast for outdoor visibility
         backgroundColor: Colors.black,
         body: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
-              // ── Top Bar (back + session name) ──────────────────────────
-              _TopBar(sessionName: widget.session?.title ?? 'Session'),
+              // ── Session content ──────────────────────────────────────────
+              Column(
+                children: [
+                  // ── Top Bar (back + session name) ────────────────────────
+                  _TopBar(
+                    sessionName: widget.session?.title ?? 'Session',
+                    onBack: _guardedExit,
+                  ),
 
-              // ── Timer ──────────────────────────────────────────────────
-              Expanded(
-                child: StreamBuilder<Duration>(
-                  stream: _audio.positionStream,
-                  initialData: Duration.zero,
-                  builder: (_, snap) =>
-                      _TimerDisplay(elapsed: snap.data ?? Duration.zero),
+                  // ── Timer ────────────────────────────────────────────────
+                  Expanded(
+                    child: StreamBuilder<Duration>(
+                      stream: _audio.positionStream,
+                      initialData: Duration.zero,
+                      builder: (_, posSnap) => StreamBuilder<Duration?>(
+                        stream: _audio.currentDurationStream,
+                        builder: (_, durSnap) {
+                          final pos = posSnap.data ?? Duration.zero;
+                          final dur = durSnap.data;
+                          // Show time remaining in current block; fall back to
+                          // elapsed if duration is unknown (e.g., still loading).
+                          Duration display;
+                          if (dur != null) {
+                            final remaining = dur - pos;
+                            display = remaining.isNegative ? Duration.zero : remaining;
+                          } else {
+                            display = pos;
+                          }
+                          return _TimerDisplay(remaining: display);
+                        },
+                      ),
+                    ),
+                  ),
+
+                  // ── Phase Label ──────────────────────────────────────────
+                  StreamBuilder<int?>(
+                    stream: _audio.currentIndexStream,
+                    initialData: 0,
+                    builder: (_, snap) {
+                      final blocks = widget.session?.sequence ?? const [];
+                      final playlistIdx = snap.data ?? 0;
+                      final map = _audio.blockIndexMap;
+                      final blockIdx = (playlistIdx < map.length)
+                          ? map[playlistIdx]
+                          : null;
+                      final label = (blockIdx != null && blockIdx < blocks.length)
+                          ? _phaseLabel(blocks[blockIdx])
+                          : '';
+                      return _PhaseLabel(phase: label);
+                    },
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  // ── Controls ─────────────────────────────────────────────
+                  _SessionControls(audio: _audio, onStop: _guardedExit),
+
+                  const SizedBox(height: 40),
+                ],
+              ),
+
+              // ── Loading overlay (shown while playlist buffers) ───────────
+              if (_loading)
+                Container(
+                  color: Colors.black,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 20),
+                        Text(
+                          'Loading session…',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          widget.session?.title ?? '',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-
-              // ── Phase Label ────────────────────────────────────────────
-              StreamBuilder<int?>(
-                stream: _audio.currentIndexStream,
-                initialData: 0,
-                builder: (_, snap) {
-                  final blocks = widget.session?.sequence ?? const [];
-                  final idx = snap.data ?? 0;
-                  final label = blocks.isEmpty
-                      ? ''
-                      : _phaseLabel(blocks[idx % blocks.length]);
-                  return _PhaseLabel(phase: label);
-                },
-              ),
-
-              const SizedBox(height: 32),
-
-              // ── Controls ───────────────────────────────────────────────
-              _SessionControls(audio: _audio, onStop: _guardedExit),
-
-              const SizedBox(height: 40),
             ],
           ),
         ),
@@ -129,9 +211,10 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
 // ── Top Bar ───────────────────────────────────────────────────────────────────
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.sessionName});
+  const _TopBar({required this.sessionName, required this.onBack});
 
   final String sessionName;
+  final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -145,10 +228,10 @@ class _TopBar extends StatelessWidget {
             width: 64,
             height: 64,
             child: IconButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: onBack,
               icon: const Icon(Icons.arrow_back_ios_new_rounded),
               color: theme.colorScheme.onSurface,
-              tooltip: 'Back',
+              tooltip: 'Stop & Back',
             ),
           ),
           Expanded(
@@ -170,9 +253,9 @@ class _TopBar extends StatelessWidget {
 // ── Timer Display ─────────────────────────────────────────────────────────────
 
 class _TimerDisplay extends StatelessWidget {
-  const _TimerDisplay({required this.elapsed});
+  const _TimerDisplay({required this.remaining});
 
-  final Duration elapsed;
+  final Duration remaining;
 
   String _fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -189,7 +272,7 @@ class _TimerDisplay extends StatelessWidget {
       child: FittedBox(
         fit: BoxFit.contain,
         child: Text(
-          _fmt(elapsed),
+          _fmt(remaining),
           style: theme.textTheme.displayLarge?.copyWith(
             // Explicit enormous base size — FittedBox scales it to fill the space
             fontSize: 200,

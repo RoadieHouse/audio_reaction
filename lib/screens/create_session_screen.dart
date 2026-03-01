@@ -106,8 +106,9 @@ class _CreateSessionBodyState extends State<_CreateSessionBody> {
         // ── Block Timeline ─────────────────────────────────────────────
         Expanded(
           child: _BlockTimeline(
-            blocks: context.watch<SessionProvider>().draftSession?.sequence ??
-                const [],
+            blocks: context.select<SessionProvider, List<SequenceBlock>>(
+              (p) => p.draftSession?.sequence ?? const [],
+            ),
           ),
         ),
 
@@ -139,6 +140,7 @@ class _BlockTimeline extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       itemCount: blocks.length,
       itemBuilder: (context, index) => _BlockRow(
+        key: ValueKey(blocks[index].id),
         block: blocks[index],
         isLast: index == blocks.length - 1,
       ),
@@ -149,7 +151,7 @@ class _BlockTimeline extends StatelessWidget {
 // ── Block Row (timeline connector + card dispatch) ────────────────────────────
 
 class _BlockRow extends StatelessWidget {
-  const _BlockRow({required this.block, required this.isLast});
+  const _BlockRow({super.key, required this.block, required this.isLast});
 
   final SequenceBlock block;
   final bool isLast;
@@ -190,8 +192,24 @@ class _BlockRow extends StatelessWidget {
   Widget _cardFor(BuildContext context, SequenceBlock block) {
     void onDelete() =>
         context.read<SessionProvider>().removeBlockFromDraft(block.id);
-    if (block is WarmUpBlock) return WarmUpCard(block: block, onDelete: onDelete);
-    if (block is DelayBlock)  return DelayCard(block: block, onDelete: onDelete);
+    if (block is WarmUpBlock) {
+      return WarmUpCard(
+        block: block,
+        onDelete: null, // warm-up is non-deletable — always present
+        onDurationChanged: (secs) => context
+            .read<SessionProvider>()
+            .updateBlockInDraft(block.copyWith(duration: Duration(seconds: secs))),
+      );
+    }
+    if (block is DelayBlock) {
+      return DelayCard(
+        block: block,
+        onDelete: onDelete,
+        onDurationChanged: (secs) => context
+            .read<SessionProvider>()
+            .updateBlockInDraft(block.copyWith(duration: Duration(seconds: secs))),
+      );
+    }
     if (block is ActionBlock) {
       return ActionCard(
         block: block,
@@ -217,78 +235,105 @@ class _LoopControlsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<SessionProvider>(
-      builder: (context, provider, _) {
-        final isInfinite = provider.draftSession?.isInfinite ?? false;
-        final repeatCount = provider.draftSession?.repeatCount ?? 1;
-        final theme = Theme.of(context);
+    final isInfinite = context.select<SessionProvider, bool>(
+      (p) => p.draftSession?.isInfinite ?? false,
+    );
+    final repeatCount = context.select<SessionProvider, int>(
+      (p) => p.draftSession?.repeatCount ?? 1,
+    );
+    final theme = Theme.of(context);
+    final dimColor = theme.colorScheme.onSurface.withValues(alpha: 0.4);
 
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-          child: Row(
+          padding: const EdgeInsets.fromLTRB(20, 2, 20, 2),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.loop_rounded,
-                  size: 18, color: theme.textTheme.bodySmall?.color),
-              const SizedBox(width: 8),
-              Text('Loop', style: theme.textTheme.bodyMedium),
-              const Spacer(),
-              Text('∞', style: theme.textTheme.bodyMedium),
-              Switch(
-                value: isInfinite,
-                onChanged: (v) => context
-                    .read<SessionProvider>()
-                    .updateDraftIsInfinite(v),
-              ),
-              const SizedBox(width: 8),
-              // Decrement
-              SizedBox(
-                width: 36,
-                height: 36,
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  icon: const Icon(Icons.remove_rounded, size: 20),
-                  onPressed: isInfinite
-                      ? null
-                      : () => context
-                          .read<SessionProvider>()
-                          .updateDraftRepeatCount(repeatCount - 1),
-                ),
-              ),
-              SizedBox(
-                width: 36,
-                child: Text(
-                  '$repeatCount×',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: isInfinite
-                        ? theme.disabledColor
-                        : theme.colorScheme.onSurface,
+              // ── Section header ────────────────────────────────────────────
+              Row(
+                children: [
+                  Icon(Icons.loop_rounded, size: 16, color: dimColor),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Loop Sequence',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: dimColor,
+                      letterSpacing: 0.8,
+                    ),
                   ),
-                ),
+                ],
               ),
-              // Increment
-              SizedBox(
-                width: 36,
-                height: 36,
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  icon: const Icon(Icons.add_rounded, size: 20),
-                  onPressed: isInfinite
-                      ? null
-                      : () => context
-                          .read<SessionProvider>()
-                          .updateDraftRepeatCount(repeatCount + 1),
-                ),
+              const SizedBox(height: 6),
+              // ── Controls row ──────────────────────────────────────────────
+              Row(
+                children: [
+                  // Infinite toggle
+                  Text('∞  Infinite',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: isInfinite
+                            ? theme.colorScheme.primary
+                            : theme.colorScheme.onSurface,
+                      )),
+                  Switch(
+                    value: isInfinite,
+                    onChanged: (v) =>
+                        context.read<SessionProvider>().updateDraftIsInfinite(v),
+                  ),
+                  const Spacer(),
+                  // Round count stepper (disabled when infinite)
+                  Text(
+                    'Rounds',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: isInfinite ? theme.disabledColor : null,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 36,
+                    height: 36,
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      icon: const Icon(Icons.remove_rounded, size: 20),
+                      onPressed: isInfinite
+                          ? null
+                          : () => context
+                              .read<SessionProvider>()
+                              .updateDraftRepeatCount(repeatCount - 1),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 32,
+                    child: Text(
+                      '$repeatCount',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: isInfinite
+                            ? theme.disabledColor
+                            : theme.colorScheme.primary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 36,
+                    height: 36,
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      icon: const Icon(Icons.add_rounded, size: 20),
+                      onPressed: isInfinite
+                          ? null
+                          : () => context
+                              .read<SessionProvider>()
+                              .updateDraftRepeatCount(repeatCount + 1),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         );
-      },
-    );
   }
 }
-
-
 class _BottomActionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {

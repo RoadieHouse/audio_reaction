@@ -354,7 +354,9 @@ class _RecordButtonState extends State<_RecordButton> {
         ],
       ),
     );
-    controller.dispose();
+    // Do NOT call controller.dispose() here — the dialog's exit animation
+    // may still be running and the TextField will call addListener on it,
+    // causing "TextEditingController used after being disposed" crash.
     return (result == null || result.isEmpty) ? null : result;
   }
 

@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../models/training_session.dart';
 import '../providers/session_provider.dart';
-import '../services/audio_service.dart';
 import 'active_session_screen.dart';
 import 'create_session_screen.dart';
 
@@ -18,14 +17,14 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Sprint React')),
-      body: Consumer<SessionProvider>(
-        builder: (context, provider, _) {
-          final sessions = provider.sessions;
+      body: Selector<SessionProvider, List<TrainingSession>>(
+        selector: (_, p) => p.sessions,
+        builder: (context, sessions, _) {
           if (sessions.isEmpty) return const _EmptyState();
           return ListView.separated(
             padding: const EdgeInsets.all(20),
             itemCount: sessions.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
             itemBuilder: (context, index) =>
                 _SessionTile(session: sessions[index]),
           );
@@ -38,41 +37,22 @@ class DashboardScreen extends StatelessWidget {
 
 // ── Session Tile ──────────────────────────────────────────────────────────────
 
-class _SessionTile extends StatefulWidget {
+class _SessionTile extends StatelessWidget {
   const _SessionTile({required this.session});
 
   final TrainingSession session;
 
-  @override
-  State<_SessionTile> createState() => _SessionTileState();
-}
-
-class _SessionTileState extends State<_SessionTile> {
-  bool _loading = false;
-
-  // FIX 1+2: debounce + call play() after loadSession().
-  Future<void> _onPlay(BuildContext context) async {
-    if (_loading) return;
-    setState(() => _loading = true);
-    try {
-      final audio = context.read<AudioService>();
-      await audio.loadSession(widget.session);
-      await audio.play();
-    } catch (_) {
-      // Errors are logged inside AudioService; navigate anyway.
-    }
-    if (!mounted) return;
-    setState(() => _loading = false);
+  void _onPlay(BuildContext context) {
     Navigator.pushNamed(
       context,
       ActiveSessionScreen.routeName,
-      arguments: widget.session,
+      arguments: session,
     );
   }
 
   // FIX 5: tap text area to edit.
   void _onEdit(BuildContext context) {
-    context.read<SessionProvider>().editExistingSession(widget.session);
+    context.read<SessionProvider>().editExistingSession(session);
     Navigator.pushNamed(context, CreateSessionScreen.routeName);
   }
 
@@ -82,16 +62,14 @@ class _SessionTileState extends State<_SessionTile> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete session?'),
-        content: Text(
-            'Delete "${widget.session.title}"? This cannot be undone.'),
+        content: Text('Delete "${session.title}"? This cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: Colors.redAccent),
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete'),
           ),
@@ -106,11 +84,11 @@ class _SessionTileState extends State<_SessionTile> {
     final theme = Theme.of(context);
 
     return Dismissible(
-      key: ValueKey(widget.session.id),
+      key: ValueKey(session.id),
       direction: DismissDirection.endToStart,
       confirmDismiss: (_) => _confirmDelete(context),
       onDismissed: (_) =>
-          context.read<SessionProvider>().deleteSession(widget.session.id),
+          context.read<SessionProvider>().deleteSession(session.id),
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
@@ -118,8 +96,11 @@ class _SessionTileState extends State<_SessionTile> {
           color: Colors.redAccent,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: const Icon(Icons.delete_outline_rounded,
-            color: Colors.white, size: 28),
+        child: const Icon(
+          Icons.delete_outline_rounded,
+          color: Colors.white,
+          size: 28,
+        ),
       ),
       child: Container(
         decoration: BoxDecoration(
@@ -131,15 +112,18 @@ class _SessionTileState extends State<_SessionTile> {
             // ── Text content (tappable → edit) ──────────────────────────
             Expanded(
               child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: () => _onEdit(context),
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 18,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.session.title,
+                        session.title,
                         style: theme.textTheme.titleMedium,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -154,7 +138,7 @@ class _SessionTileState extends State<_SessionTile> {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            _formatDuration(widget.session.totalDuration),
+                            _formatDuration(session.totalDuration),
                             style: theme.textTheme.bodySmall,
                           ),
                           const SizedBox(width: 16),
@@ -165,7 +149,7 @@ class _SessionTileState extends State<_SessionTile> {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            '${widget.session.actionCount} actions',
+                            '${session.actionCount} actions',
                             style: theme.textTheme.bodySmall,
                           ),
                         ],
@@ -176,29 +160,21 @@ class _SessionTileState extends State<_SessionTile> {
               ),
             ),
 
-            // ── Play Button / Loading Indicator (64×64 tap target) ───────
+            // ── Play Button (64×64 tap target) ───────────────────────────
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: SizedBox(
                 width: 64,
                 height: 64,
-                child: _loading
-                    ? const Center(
-                        child: SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: CircularProgressIndicator(strokeWidth: 2.5),
-                        ),
-                      )
-                    : IconButton(
-                        onPressed: () => _onPlay(context),
-                        icon: Icon(
-                          Icons.play_circle_filled_rounded,
-                          color: theme.colorScheme.primary,
-                          size: 40,
-                        ),
-                        tooltip: 'Start Session',
-                      ),
+                child: IconButton(
+                  onPressed: () => _onPlay(context),
+                  icon: Icon(
+                    Icons.play_circle_filled_rounded,
+                    color: theme.colorScheme.primary,
+                    size: 40,
+                  ),
+                  tooltip: 'Start Session',
+                ),
               ),
             ),
           ],
@@ -222,8 +198,10 @@ class _CreateSessionFab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FloatingActionButton.extended(
-      onPressed: () =>
-          Navigator.pushNamed(context, CreateSessionScreen.routeName),
+      onPressed: () {
+        context.read<SessionProvider>().startNewDraft();
+        Navigator.pushNamed(context, CreateSessionScreen.routeName);
+      },
       icon: const Icon(Icons.add_rounded),
       label: const Text(
         'New Session',

@@ -204,6 +204,18 @@ class _DurationFieldState extends State<_DurationField> {
   }
 
   @override
+  void didUpdateWidget(_DurationField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Sync the text when the block's duration changes externally (e.g., when
+    // loading an existing session for editing). Only update if the field is
+    // not currently focused so we don't interrupt the user mid-edit.
+    if (oldWidget.initialSeconds != widget.initialSeconds &&
+        !_controller.value.composing.isValid) {
+      _controller.text = widget.initialSeconds.toString();
+    }
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     super.dispose();

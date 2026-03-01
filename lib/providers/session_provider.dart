@@ -87,7 +87,8 @@ class SessionProvider extends ChangeNotifier {
 
   // ── Draft Lifecycle ────────────────────────────────────────────────────────
 
-  /// Creates a blank draft session and begins the build flow.
+  /// Creates a blank draft session with a default 10-second warm-up block
+  /// already inserted. The warm-up plays once before the looped sequence.
   ///
   /// Call this when the user taps the FAB on [DashboardScreen].
   void startNewDraft() {
@@ -95,16 +96,36 @@ class SessionProvider extends ChangeNotifier {
       id: _generateId(),
       title: '',
       totalDuration: Duration.zero,
-      sequence: const [],
+      sequence: [
+        WarmUpBlock(
+          id: _generateId(),
+          duration: const Duration(seconds: 10),
+        ),
+      ],
     );
     notifyListeners();
   }
 
   /// Loads an existing session into the draft for editing.
   ///
+  /// Ensures a [WarmUpBlock] is always the first block, adding a default
+  /// 10-second one if the saved session pre-dates this feature.
+  ///
   /// Call this when the user taps an edit button on a saved session tile.
   void editExistingSession(TrainingSession session) {
-    _draftSession = session;
+    final hasWarmUp =
+        session.sequence.isNotEmpty && session.sequence.first is WarmUpBlock;
+    _draftSession = hasWarmUp
+        ? session
+        : session.copyWith(
+            sequence: [
+              WarmUpBlock(
+                id: _generateId(),
+                duration: const Duration(seconds: 10),
+              ),
+              ...session.sequence,
+            ],
+          );
     notifyListeners();
   }
 
@@ -126,6 +147,19 @@ class SessionProvider extends ChangeNotifier {
   void updateDraftIsInfinite(bool value) {
     if (_draftSession == null) return;
     _draftSession = _draftSession!.copyWith(isInfinite: value);
+    notifyListeners();
+  }
+
+  /// Replaces the block whose [SequenceBlock.id] matches [updatedBlock.id]
+  /// in the draft's sequence. Used to edit duration or other properties of
+  /// an existing block without changing its position in the timeline.
+  void updateBlockInDraft(SequenceBlock updatedBlock) {
+    if (_draftSession == null) return;
+    _draftSession = _draftSession!.copyWith(
+      sequence: _draftSession!.sequence
+          .map((b) => b.id == updatedBlock.id ? updatedBlock : b)
+          .toList(),
+    );
     notifyListeners();
   }
 
@@ -175,10 +209,22 @@ class SessionProvider extends ChangeNotifier {
     if (_draftSession == null) return false;
     if (_draftSession!.title.trim().isEmpty) return false;
 
+    // Compute duration: warm-up plays once, loop delays repeat N times.
+    // ActionBlock audio durations are not tracked (unknown at edit time).
+    final warmUpDuration = _draftSession!.sequence
+        .whereType<WarmUpBlock>()
+        .fold(Duration.zero, (sum, b) => sum + b.duration);
+    final loopDelayDuration = _draftSession!.sequence
+        .whereType<DelayBlock>()
+        .fold(Duration.zero, (sum, b) => sum + b.duration);
+    final rc = _draftSession!.repeatCount;
+    final totalDuration = warmUpDuration +
+        (_draftSession!.isInfinite ? loopDelayDuration : loopDelayDuration * rc);
+
     // Stamp the computed duration before saving.
     final toSave = _draftSession!.copyWith(
       title: _draftSession!.title.trim(),
-      totalDuration: _draftSession!.computedDuration,
+      totalDuration: totalDuration,
     );
 
     final existingIndex = _sessions.indexWhere((s) => s.id == toSave.id);
@@ -262,10 +308,11 @@ class SessionProvider extends ChangeNotifier {
     });
   }
 
-  /// Generates a simple unique ID from the current timestamp (microseconds).
-  ///
-  /// Sufficient for local, single-device use. Replace with `uuid` package if
-  /// multi-device sync is ever needed.
+  static int _idCounter = 0;
+
+  /// Generates a unique ID from the current timestamp plus an incrementing
+  /// counter to prevent collisions when called in rapid succession
+  /// (e.g., session ID + WarmUpBlock ID generated back-to-back).
   static String _generateId() =>
-      DateTime.now().microsecondsSinceEpoch.toString();
+      '${DateTime.now().microsecondsSinceEpoch}_${_idCounter++}';
 }
