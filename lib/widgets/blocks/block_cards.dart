@@ -76,11 +76,16 @@ class ActionCard extends StatelessWidget {
     required this.block,
     this.onAddSound,
     this.onDelete,
+    this.onCueRemoved,
   });
 
   final ActionBlock block;
   final VoidCallback? onAddSound;
   final VoidCallback? onDelete;
+
+  /// Called when the user taps the ✕ on a cue chip. The caller is responsible
+  /// for guarding against removing the last cue.
+  final ValueChanged<AudioCue>? onCueRemoved;
 
   @override
   Widget build(BuildContext context) {
@@ -88,7 +93,11 @@ class ActionCard extends StatelessWidget {
       accentColor: AppTheme.blockAction,
       typeLabel: 'ACTION',
       onDelete: onDelete,
-      child: _CueRow(cues: block.audioCues, onAddSound: onAddSound),
+      child: _CueRow(
+        cues: block.audioCues,
+        onAddSound: onAddSound,
+        onCueRemoved: onCueRemoved,
+      ),
     );
   }
 }
@@ -255,10 +264,13 @@ class _DurationFieldState extends State<_DurationField> {
 
 /// Displays the [AudioCue] pool as chips and an "Add Sound" icon button.
 class _CueRow extends StatelessWidget {
-  const _CueRow({required this.cues, this.onAddSound});
+  const _CueRow({required this.cues, this.onAddSound, this.onCueRemoved});
 
   final List<AudioCue> cues;
   final VoidCallback? onAddSound;
+
+  /// Called when the user taps ✕ on a chip. Null = chips are non-deletable.
+  final ValueChanged<AudioCue>? onCueRemoved;
 
   @override
   Widget build(BuildContext context) {
@@ -286,6 +298,11 @@ class _CueRow extends StatelessWidget {
                           side: BorderSide.none,
                           padding: const EdgeInsets.symmetric(horizontal: 4),
                           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          onDeleted: onCueRemoved != null
+                              ? () => onCueRemoved!(c)
+                              : null,
+                          deleteIconColor:
+                              AppTheme.blockAction.withValues(alpha: 0.7),
                         ),
                       )
                       .toList(),

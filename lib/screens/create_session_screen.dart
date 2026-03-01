@@ -244,8 +244,27 @@ class _BlockRow extends StatelessWidget {
     if (block is ActionBlock) {
       return ActionCard(
         block: block,
-        onAddSound: () => showSoundPickerBottomSheet(context),
+        onAddSound: () =>
+            showSoundPickerBottomSheet(context, existingBlockId: block.id),
         onDelete: onDelete,
+        onCueRemoved: (cue) {
+          if (block.audioCues.length <= 1) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'An action block must have at least one sound.'),
+              ),
+            );
+            return;
+          }
+          context.read<SessionProvider>().updateBlockInDraft(
+                block.copyWith(
+                  audioCues: block.audioCues
+                      .where((c) => c.id != cue.id)
+                      .toList(),
+                ),
+              );
+        },
       );
     }
     return const SizedBox.shrink();

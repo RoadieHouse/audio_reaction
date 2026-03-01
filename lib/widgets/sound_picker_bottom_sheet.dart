@@ -12,21 +12,27 @@ import '../services/recording_service.dart';
 /// Opens the sound-picker bottom sheet.
 ///
 /// The sheet reads [SessionProvider] from context directly.
-/// When the user selects a cue, a new [ActionBlock] is appended to the draft
-/// via [SessionProvider.addBlockToDraft] and the sheet closes automatically.
-void showSoundPickerBottomSheet(BuildContext context) {
+/// When [existingBlockId] is null, selecting a cue creates a new [ActionBlock]
+/// and appends it to the draft. When [existingBlockId] is provided, the cue is
+/// appended to that block's [ActionBlock.audioCues] list instead.
+void showSoundPickerBottomSheet(BuildContext context,
+    {String? existingBlockId}) {
   showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => const _SoundPickerSheet(),
+    builder: (_) => _SoundPickerSheet(existingBlockId: existingBlockId),
   );
 }
 
 // ── Private Sheet Widget ──────────────────────────────────────────────────────
 
 class _SoundPickerSheet extends StatefulWidget {
-  const _SoundPickerSheet();
+  const _SoundPickerSheet({this.existingBlockId});
+
+  /// When non-null, the selected cue is added to this block's audioCues list.
+  /// When null, a new ActionBlock is created.
+  final String? existingBlockId;
 
   @override
   State<_SoundPickerSheet> createState() => _SoundPickerSheetState();
@@ -101,10 +107,29 @@ class _SoundPickerSheetState extends State<_SoundPickerSheet> {
   }
 
   void _onCueSelected(BuildContext context, AudioCue cue) {
-    final id = DateTime.now().microsecondsSinceEpoch.toString();
-    context.read<SessionProvider>().addBlockToDraft(
-          ActionBlock(id: id, audioCues: [cue]),
+    final provider = context.read<SessionProvider>();
+    final existingBlockId = widget.existingBlockId;
+
+    if (existingBlockId == null) {
+      // New block mode — create and append a fresh ActionBlock.
+      final id = DateTime.now().microsecondsSinceEpoch.toString();
+      provider.addBlockToDraft(ActionBlock(id: id, audioCues: [cue]));
+    } else {
+      // Add-to-existing mode — append the cue to the matching ActionBlock.
+      final sequence = provider.draftSession?.sequence ?? const [];
+      ActionBlock? target;
+      for (final b in sequence) {
+        if (b is ActionBlock && b.id == existingBlockId) {
+          target = b;
+          break;
+        }
+      }
+      if (target != null) {
+        provider.updateBlockInDraft(
+          target.copyWith(audioCues: [...target.audioCues, cue]),
         );
+      }
+    }
     Navigator.of(context).pop();
   }
 }
