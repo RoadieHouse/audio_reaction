@@ -1,149 +1,321 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 /// Centralized theme definition for Sprint React.
 /// All widgets reference Theme.of(context) — no hardcoded colors.
 abstract class AppTheme {
-  // ── Design Tokens ──────────────────────────────────────────────────────────
-  static const Color neonGreen = Color(0xFF39FF14);
-  static const Color background = Color(0xFF0A0A0A); // near-pure black
-  static const Color surface = Color(0xFF141414);    // deep charcoal
-  static const Color onSurface = Color(0xFFE0E0E0);
-  static const Color error = Color(0xFFFF4444);
+  // ── Design Tokens (Premium Minimalist Palette) ───────────────────────────
 
-  // Block type accent colors (used in CreateSessionScreen cards)
-  static const Color blockWarmUp = Color(0xFF2979FF);   // Electric Blue
-  static const Color blockLoop = Color(0xFFFFAB00);     // Amber
-  static const Color blockAction = neonGreen;           // Neon Green
-  static const Color blockDelay = Color(0xFF9E9E9E);    // Grey
+  // A modern, energetic "Volt" accent. Used sparingly for FABs and active states.
+  static const Color brandAccent = Color(0xFFD4FF26);
 
-  // ── Public Theme ───────────────────────────────────────────────────────────
+  // Deep Zinc 950. Richer and more professional than pure harsh black.
+  static const Color bgBase = Color(0xFF09090B);
+
+  // Zinc 900. Subtle elevation for cards and bottom sheets.
+  static const Color bgSurface = Color(0xFF18181B);
+
+  // Zinc 800. Used for chips or inputs sitting inside a bgSurface card.
+  static const Color bgSurfaceElevated = Color(0xFF27272A);
+
+  // Zinc 50. Crisp off-white. Prevents the "bleeding" effect of pure white text.
+  static const Color textPrimary = Color(0xFFFAFAFA);
+
+  // Zinc 400. Highly readable grey for secondary text and icons.
+  static const Color textSecondary = Color(0xFFA1A1AA);
+
+  static const Color error = Color(0xFFEF4444); // Softer, modern red
+
+  // Refined, muted block colors.
+  // Used only for tiny UI hints (like a subtle dot or left-border).
+  static const Color blockWarmUp = Color(0xFF60A5FA); // Soft Blue
+  static const Color blockLoop = Color(0xFFFBBF24); // Soft Amber
+  static const Color blockAction = brandAccent;
+  static const Color blockDelay = textSecondary;
+
+  // ── Theme Extension for block colors ─────────────────────────────────────
+
+  static const _blockColorsExtension = BlockColors(
+    warmUp: blockWarmUp,
+    loop: blockLoop,
+    action: blockAction,
+    delay: blockDelay,
+  );
+
+  // ── Public Theme ─────────────────────────────────────────────────────────
+
   static ThemeData get darkTheme {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: neonGreen,
+    // 1. Initialize the base text theme with the Inter font
+    final baseTextTheme = GoogleFonts.interTextTheme(
+      ThemeData.dark().textTheme,
+    );
+
+    // 2. Build a fully-aligned dark ColorScheme, overriding key roles
+    final baseScheme = ColorScheme.fromSeed(
+      seedColor: brandAccent,
       brightness: Brightness.dark,
-    ).copyWith(
-      primary: neonGreen,
+    );
+
+    final colorScheme = baseScheme.copyWith(
+      primary: brandAccent,
       onPrimary: Colors.black,
-      surface: surface,
-      onSurface: onSurface,
+      secondary: textSecondary,
+      onSecondary: textPrimary,
+      tertiary: blockWarmUp,
+      onTertiary: textPrimary,
       error: error,
+      onError: textPrimary,
+      surface: bgSurface,
+      surfaceContainerHighest: bgSurfaceElevated,
+      surfaceContainerHigh: bgSurface,
+      surfaceContainer: bgSurface,
+      surfaceContainerLow: bgSurface,
+      surfaceDim: bgBase,
+      surfaceBright: bgSurface,
+      onSurface: textPrimary,
+      onSurfaceVariant: textSecondary,
+      outline: bgSurfaceElevated,
+      outlineVariant: bgSurfaceElevated,
+      inverseSurface: textPrimary,
+      onInverseSurface: bgBase,
+      inversePrimary: brandAccent,
+    );
+
+    // 3. Refined typography: slightly lighter weights and limited negative tracking
+    final textTheme = baseTextTheme.copyWith(
+      displayLarge: baseTextTheme.displayLarge?.copyWith(
+        fontWeight: FontWeight.w700,
+        color: textPrimary,
+        letterSpacing: -0.5,
+      ),
+      titleLarge: baseTextTheme.titleLarge?.copyWith(
+        fontWeight: FontWeight.w600,
+        color: textPrimary,
+        letterSpacing: -0.25,
+        fontSize: 22,
+      ),
+      titleMedium: baseTextTheme.titleMedium?.copyWith(
+        fontWeight: FontWeight.w500,
+        color: textPrimary,
+      ),
+      bodyMedium: baseTextTheme.bodyMedium?.copyWith(
+        color: textPrimary,
+        fontWeight: FontWeight.w400,
+      ),
+      bodySmall: baseTextTheme.bodySmall?.copyWith(
+        color: textSecondary,
+        fontWeight: FontWeight.w400,
+      ),
+      labelLarge: baseTextTheme.labelLarge?.copyWith(
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.1,
+      ),
     );
 
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
-      scaffoldBackgroundColor: background,
+      scaffoldBackgroundColor: bgBase,
+      textTheme: textTheme,
+      extensions: const <ThemeExtension<dynamic>>[_blockColorsExtension],
 
-      appBarTheme: const AppBarTheme(
-        backgroundColor: background,
-        foregroundColor: onSurface,
+      // 4. APP BAR: Seamless blend with background, aligned with textTheme
+      appBarTheme: AppBarTheme(
+        backgroundColor: bgBase,
+        foregroundColor: textPrimary,
         elevation: 0,
+        scrolledUnderElevation: 0,
         centerTitle: false,
-        titleTextStyle: TextStyle(
-          color: onSurface,
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
+        titleTextStyle: textTheme.titleLarge?.copyWith(
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.25,
         ),
       ),
 
+      // 5. CARDS: Zero elevation, distinct surface color, no unwanted surface tint
       cardTheme: CardThemeData(
-        color: surface,
+        color: colorScheme.surface,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         margin: const EdgeInsets.symmetric(vertical: 6),
       ),
 
-      floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: neonGreen,
-        foregroundColor: Colors.black,
+      // 6. FLOATING ACTION BUTTON: Primary pop of color, uses scheme colors
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: colorScheme.primary,
+        foregroundColor: colorScheme.onPrimary,
         elevation: 0,
-        extendedPadding: EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-      ),
-
-      iconButtonTheme: IconButtonThemeData(
-        style: ButtonStyle(
-          minimumSize: WidgetStateProperty.all(const Size(64, 64)),
-          iconSize: WidgetStateProperty.all(32),
+        focusElevation: 0,
+        hoverElevation: 0,
+        highlightElevation: 0,
+        shape: const StadiumBorder(),
+        extendedPadding: const EdgeInsets.symmetric(
+          horizontal: 24,
+          vertical: 16,
         ),
+        extendedTextStyle: textTheme.labelLarge?.copyWith(fontSize: 16),
       ),
 
+      // 7. BUTTONS: Primary uses brand color; white variant remains possible ad hoc
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: neonGreen,
-          foregroundColor: Colors.black,
-          minimumSize: const Size(64, 56),
-          textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          backgroundColor: colorScheme.primary,
+          foregroundColor: colorScheme.onPrimary,
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          minimumSize: const Size(64, 52),
+          textStyle: textTheme.labelLarge?.copyWith(fontSize: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
       ),
 
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: neonGreen,
-          side: const BorderSide(color: neonGreen, width: 1.5),
-          minimumSize: const Size(64, 56),
-          textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          foregroundColor: colorScheme.onSurface,
+          side: BorderSide(color: colorScheme.outline, width: 1.5),
+          minimumSize: const Size(64, 52),
+          textStyle: textTheme.labelLarge?.copyWith(fontSize: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
       ),
 
+      // 8. INPUTS: Soft, borderless forms with clear focus state
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: surface,
-        labelStyle: const TextStyle(color: onSurface),
+        fillColor: bgSurfaceElevated,
+        labelStyle: textTheme.bodySmall,
+        floatingLabelStyle: textTheme.bodySmall?.copyWith(
+          color: textPrimary,
+          fontWeight: FontWeight.w500,
+        ),
+        hintStyle: textTheme.bodySmall?.copyWith(
+          color: textSecondary.withValues(alpha: 0.5),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+          borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+          borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: neonGreen, width: 2),
+          borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colorScheme.error, width: 1.5),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colorScheme.error, width: 1.5),
         ),
       ),
 
-      tabBarTheme: const TabBarThemeData(
-        labelColor: neonGreen,
-        unselectedLabelColor: onSurface,
-        indicatorColor: neonGreen,
-        dividerColor: Colors.transparent,
+      // 9. CHIPS: Borderless, elevated elements aligned with surfaceVariant
+      chipTheme: ChipThemeData(
+        backgroundColor: colorScheme.surfaceContainerHighest,
+        deleteIconColor: textSecondary,
+        labelStyle: textTheme.bodySmall?.copyWith(
+          color: textPrimary,
+          fontWeight: FontWeight.w500,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        side: BorderSide.none,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
 
-      listTileTheme: const ListTileThemeData(
-        tileColor: surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
+      // 10. LIST TILE: Clean styling inside cards
+      listTileTheme: ListTileThemeData(
+        iconColor: textSecondary,
+        textColor: textPrimary,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(16)),
         ),
-        contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
       ),
 
-      textTheme: const TextTheme(
-        // Massive countdown timer — scaled by FittedBox
-        displayLarge: TextStyle(
-          fontWeight: FontWeight.w900,
-          color: neonGreen,
-          letterSpacing: -2,
-        ),
-        // Phase label ("Sprinting", "Rest")
-        titleLarge: TextStyle(
-          fontWeight: FontWeight.bold,
-          color: onSurface,
-          letterSpacing: 3,
-          fontSize: 20,
-        ),
-        titleMedium: TextStyle(fontWeight: FontWeight.bold, color: onSurface),
-        bodyMedium: TextStyle(color: onSurface),
-        bodySmall: TextStyle(color: Color(0xFF9E9E9E)),
-      ),
-
+      // 11. DIVIDERS: Barely visible structural lines
       dividerTheme: DividerThemeData(
-        color: Colors.white.withValues(alpha: 0.08),
+        color: colorScheme.outlineVariant,
         thickness: 1,
+        space: 24,
       ),
+
+      // 12. SWITCH: Premium look, using scheme colors
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith<Color>((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return textSecondary.withValues(alpha: 0.4);
+          }
+          if (states.contains(WidgetState.selected)) {
+            return colorScheme.onPrimary;
+          }
+          return textSecondary;
+        }),
+        trackColor: WidgetStateProperty.resolveWith<Color>((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return bgSurfaceElevated.withValues(alpha: 0.5);
+          }
+          if (states.contains(WidgetState.selected)) {
+            return colorScheme.primary;
+          }
+          return bgSurfaceElevated;
+        }),
+        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
+      ),
+    );
+  }
+}
+
+/// ThemeExtension for block-specific colors (warm-up, loop, etc.).
+// ignore: unintended_html_in_doc_comment
+/// Access via: Theme.of(context).extension<BlockColors>().
+class BlockColors extends ThemeExtension<BlockColors> {
+  final Color warmUp;
+  final Color loop;
+  final Color action;
+  final Color delay;
+
+  const BlockColors({
+    required this.warmUp,
+    required this.loop,
+    required this.action,
+    required this.delay,
+  });
+
+  @override
+  BlockColors copyWith({
+    Color? warmUp,
+    Color? loop,
+    Color? action,
+    Color? delay,
+  }) {
+    return BlockColors(
+      warmUp: warmUp ?? this.warmUp,
+      loop: loop ?? this.loop,
+      action: action ?? this.action,
+      delay: delay ?? this.delay,
+    );
+  }
+
+  @override
+  BlockColors lerp(ThemeExtension<BlockColors>? other, double t) {
+    if (other is! BlockColors) return this;
+    return BlockColors(
+      warmUp: Color.lerp(warmUp, other.warmUp, t)!,
+      loop: Color.lerp(loop, other.loop, t)!,
+      action: Color.lerp(action, other.action, t)!,
+      delay: Color.lerp(delay, other.delay, t)!,
     );
   }
 }

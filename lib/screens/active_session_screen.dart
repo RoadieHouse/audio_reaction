@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
@@ -7,26 +8,33 @@ import 'package:provider/provider.dart';
 import '../models/sequence_block.dart';
 import '../models/training_session.dart';
 import '../services/audio_service.dart';
+import '../theme/app_theme.dart';
 
-// ── Phase label helper ────────────────────────────────────────────────────────
+// ── Phase helpers ─────────────────────────────────────────────────────────────
 
-String _phaseLabel(SequenceBlock block) {
+String _phaseLabel(SequenceBlock? block) {
   if (block is WarmUpBlock) return 'WARM UP';
-  if (block is DelayBlock) return 'DELAY';
-  if (block is ActionBlock) {
-    return block.audioCues.isNotEmpty
-        ? block.audioCues.first.name.toUpperCase()
-        : 'ACTION';
-  }
+  if (block is DelayBlock) return 'REST';
+  if (block is ActionBlock) return 'ACTION';
   return '';
 }
 
+/// Returns [brandAccent] for action blocks (high-intensity cue), otherwise
+/// [textPrimary] (white) so the ring subtly shifts colour when a cue fires.
+Color _phaseRingColor(SequenceBlock? block, ColorScheme cs) =>
+    block is ActionBlock ? AppTheme.brandAccent : AppTheme.textPrimary;
+
+String _fmt(Duration d) {
+  final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+  return '$m:$s';
+}
+
 /// Distraction-free active session screen.
-/// Features a screen-filling countdown timer, phase indicator, and controls.
 ///
-/// [CORE-01]: All timing is handled by just_audio natively via SilenceAudioSource
-/// playlist items — no Dart Timer/Future.delayed used, so playback survives
-/// screen lock and backgrounding on both iOS and Android.
+/// [CORE-01]: All training timing is driven by just_audio's native playlist
+/// (SilenceAudioSource items). The UI uses a [Stopwatch] only for display
+/// purposes — the audio sequence is completely unaffected by screen lock.
 class ActiveSessionScreen extends StatefulWidget {
   const ActiveSessionScreen({super.key, this.session});
 
@@ -41,31 +49,61 @@ class ActiveSessionScreen extends StatefulWidget {
 class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   late final AudioService _audio;
   late final StreamSubscription<PlayerState> _stateSub;
-  bool _didExit = false;
+  late final StreamSubscription<bool> _playingSub;
+  late final StreamSubscription<int?> _indexSub;
 
-  /// Single exit point for all navigation-away paths.
-  /// Guards against duplicate pops from simultaneous stream events.
+  bool _didExit = false;
+  bool _isPlaying = false;
+  int _playlistIdx = 0;
+
+  /// Wall-clock elapsed time — used only for the UI countdown/countup.
+  /// The audio timeline is independent and survives screen lock [CORE-01].
+  final Stopwatch _watch = Stopwatch();
+  Timer? _ticker;
+
+  // ── Exit ──────────────────────────────────────────────────────────────────
+
   void _guardedExit() {
     if (_didExit) return;
     _didExit = true;
+    _ticker?.cancel();
+    _watch.stop();
     _audio.stop().then((_) {
       if (mounted) Navigator.of(context).pop();
     });
   }
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
     _audio = context.read<AudioService>();
 
-    // Subscribe to completion BEFORE loading so no event is missed.
+    // Detect natural playlist completion before loading, so no event is missed.
     _stateSub = _audio.playerStateStream.listen((state) {
-      if (state.processingState == ProcessingState.completed) {
-        _guardedExit();
+      if (state.processingState == ProcessingState.completed) _guardedExit();
+    });
+
+    // Sync the Stopwatch with the player playing/paused state.
+    _playingSub = _audio.playingStream.listen((playing) {
+      if (!mounted) return;
+      setState(() => _isPlaying = playing);
+      if (playing) {
+        _watch.start();
+        _ticker ??= Timer.periodic(const Duration(milliseconds: 200), (_) {
+          if (mounted) setState(() {});
+        });
+      } else {
+        _watch.stop();
       }
     });
 
-    // Guard: pop immediately if no session was passed.
+    // Track the current playlist index for phase/round labels.
+    _indexSub = _audio.currentIndexStream.listen((idx) {
+      if (mounted) setState(() => _playlistIdx = idx ?? 0);
+    });
+
     if (widget.session == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) Navigator.of(context).pop();
@@ -73,31 +111,99 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
       return;
     }
 
-    // Fire-and-forget: screen renders immediately; audio starts as soon as
-    // the player is ready (near-instant with a small one-pass playlist).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _audio.loadSession(widget.session!).then((_) {
-        if (mounted) _audio.play();
-      }).catchError((Object e) {
-        assert(() {
-          // ignore: avoid_print
-          print('[ActiveSession] load/play failed: $e');
-          return true;
-        }());
-        if (mounted) _guardedExit();
-      });
+      _audio
+          .loadSession(widget.session!)
+          .then((_) {
+            if (mounted) _audio.play();
+          })
+          .catchError((Object e) {
+            assert(() {
+              // ignore: avoid_print
+              print('[ActiveSession] load/play failed: $e');
+              return true;
+            }());
+            if (mounted) _guardedExit();
+          });
     });
   }
 
   @override
   void dispose() {
     _stateSub.cancel();
+    _playingSub.cancel();
+    _indexSub.cancel();
+    _ticker?.cancel();
     super.dispose();
   }
 
+  // ── Derived helpers ───────────────────────────────────────────────────────
+
+  /// Best-effort total session duration: uses persisted value, then falls back
+  /// to the computed helper (warmup + delays × rounds).
+  Duration get _sessionTotal {
+    final d = widget.session?.totalDuration ?? Duration.zero;
+    return d == Duration.zero
+        ? (widget.session?.computedDuration ?? Duration.zero)
+        : d;
+  }
+
+  /// For finite sessions: time remaining. For infinite: elapsed.
+  Duration get _displayTime {
+    if (widget.session?.isInfinite ?? false) return _watch.elapsed;
+    final remaining = _sessionTotal - _watch.elapsed;
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  /// Ring fill fraction (0.0–1.0). Returns null for infinite sessions,
+  /// signalling an indeterminate ring state.
+  double? get _ringProgress {
+    if (widget.session?.isInfinite ?? false) return null;
+    final totalMs = _sessionTotal.inMilliseconds;
+    if (totalMs == 0) return null;
+    return (_watch.elapsed.inMilliseconds / totalMs).clamp(0.0, 1.0);
+  }
+
+  /// Current [SequenceBlock] being played, derived from the playlist index.
+  SequenceBlock? get _currentBlock {
+    final map = _audio.blockIndexMap;
+    if (_playlistIdx >= map.length) return null;
+    final blockIdx = map[_playlistIdx];
+    if (blockIdx == null) return null;
+    final seq = widget.session?.sequence;
+    if (seq == null || blockIdx >= seq.length) return null;
+    return seq[blockIdx];
+  }
+
+  /// Short label describing the current position in the session, e.g.
+  /// "WARM UP", "ROUND 1 OF 3", or "ROUND 4" for infinite sessions.
+  String get _roundLabel {
+    final session = widget.session;
+    if (session == null) return '';
+    if (_playlistIdx < _audio.warmupItemCount) return 'WARM UP';
+    final passes = _audio.passStartIndices;
+    if (passes.isEmpty) return '';
+    int passIdx = 0;
+    for (int i = passes.length - 1; i >= 0; i--) {
+      if (_playlistIdx >= passes[i]) {
+        passIdx = i;
+        break;
+      }
+    }
+    final round = passIdx + 1;
+    return session.isInfinite
+        ? 'ROUND $round'
+        : 'ROUND $round OF ${session.repeatCount}';
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final block = _currentBlock;
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (bool didPop, _) {
@@ -105,71 +211,50 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
         _guardedExit();
       },
       child: Scaffold(
-        // Pure black — maximum contrast for outdoor visibility
-        backgroundColor: Colors.black,
+        backgroundColor: AppTheme.bgBase,
         body: SafeArea(
-          child: Stack(
+          child: Column(
             children: [
-              // ── Session content ──────────────────────────────────────────
-              Column(
-                children: [
-                  // ── Top Bar (back + session name) ────────────────────────
-                  _TopBar(
-                    sessionName: widget.session?.title ?? 'Session',
-                    onBack: _guardedExit,
-                  ),
-
-                  // ── Timer ────────────────────────────────────────────────
-                  Expanded(
-                    child: StreamBuilder<Duration>(
-                      stream: _audio.positionStream,
-                      initialData: Duration.zero,
-                      builder: (_, posSnap) => StreamBuilder<Duration?>(
-                        stream: _audio.currentDurationStream,
-                        builder: (_, durSnap) {
-                          final pos = posSnap.data ?? Duration.zero;
-                          final dur = durSnap.data;
-                          // Show time remaining in current block; fall back to
-                          // elapsed if duration is unknown (e.g., still loading).
-                          Duration display;
-                          if (dur != null) {
-                            final remaining = dur - pos;
-                            display = remaining.isNegative ? Duration.zero : remaining;
-                          } else {
-                            display = pos;
-                          }
-                          return _TimerDisplay(remaining: display);
-                        },
-                      ),
-                    ),
-                  ),
-
-                  // ── Phase Label ──────────────────────────────────────────
-                  StreamBuilder<int?>(
-                    stream: _audio.currentIndexStream,
-                    initialData: 0,
-                    builder: (_, snap) {
-                      final blocks = widget.session?.sequence ?? const [];
-                      final playlistIdx = snap.data ?? 0;
-                      final map = _audio.blockIndexMap;
-                      final blockIdx = (playlistIdx < map.length)
-                          ? map[playlistIdx]
-                          : null;
-                      final label = (blockIdx != null && blockIdx < blocks.length)
-                          ? _phaseLabel(blocks[blockIdx])
-                          : '';
-                      return _PhaseLabel(phase: label);
+              const SizedBox(height: 8),
+              _Header(
+                title: widget.session?.title ?? 'Session',
+                roundLabel: _roundLabel,
+                onBack: _guardedExit,
+              ),
+              const SizedBox(height: 16),
+              // Ring takes all remaining vertical + horizontal space.
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final size = math.min(
+                        constraints.maxWidth,
+                        constraints.maxHeight,
+                      );
+                      return Center(
+                        child: SizedBox.square(
+                          dimension: size,
+                          child: _SessionRing(
+                            progress: _ringProgress,
+                            ringColor: _phaseRingColor(block, cs),
+                            displayTime: _displayTime,
+                            phase: _phaseLabel(block),
+                            showElapsed: widget.session?.isInfinite ?? false,
+                          ),
+                        ),
+                      );
                     },
                   ),
-
-                  const SizedBox(height: 32),
-
-                  // ── Controls ─────────────────────────────────────────────
-                  _SessionControls(audio: _audio, onStop: _guardedExit),
-
-                  const SizedBox(height: 40),
-                ],
+                ),
               ),
+              const SizedBox(height: 28),
+              _Controls(
+                audio: _audio,
+                isPlaying: _isPlaying,
+                onStop: _guardedExit,
+              ),
+              const SizedBox(height: 40),
             ],
           ),
         ),
@@ -178,173 +263,335 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
   }
 }
 
-// ── Top Bar ───────────────────────────────────────────────────────────────────
+// ── Header ────────────────────────────────────────────────────────────────────
 
-class _TopBar extends StatelessWidget {
-  const _TopBar({required this.sessionName, required this.onBack});
+class _Header extends StatelessWidget {
+  const _Header({
+    required this.title,
+    required this.roundLabel,
+    required this.onBack,
+  });
 
-  final String sessionName;
+  final String title;
+  final String roundLabel;
   final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Row(
-        children: [
-          // Back/Stop — 64×64 tap target
-          SizedBox(
-            width: 64,
-            height: 64,
-            child: IconButton(
-              onPressed: onBack,
-              icon: const Icon(Icons.arrow_back_ios_new_rounded),
-              color: theme.colorScheme.onSurface,
-              tooltip: 'Stop & Back',
-            ),
-          ),
-          Expanded(
-            child: Text(
-              sessionName,
-              style: theme.textTheme.titleMedium,
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          // Spacer to balance the back button
-          const SizedBox(width: 64),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Timer Display ─────────────────────────────────────────────────────────────
-
-class _TimerDisplay extends StatelessWidget {
-  const _TimerDisplay({required this.remaining});
-
-  final Duration remaining;
-
-  String _fmt(Duration d) {
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      // Horizontal padding so the timer doesn't hit the edge
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: FittedBox(
-        fit: BoxFit.contain,
-        child: Text(
-          _fmt(remaining),
-          style: theme.textTheme.displayLarge?.copyWith(
-            // Explicit enormous base size — FittedBox scales it to fill the space
-            fontSize: 200,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ── Phase Label ───────────────────────────────────────────────────────────────
-
-class _PhaseLabel extends StatelessWidget {
-  const _PhaseLabel({required this.phase});
-
-  final String phase;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(phase, style: Theme.of(context).textTheme.titleLarge);
-  }
-}
-
-// ── Session Controls ──────────────────────────────────────────────────────────
-
-class _SessionControls extends StatelessWidget {
-  const _SessionControls({required this.audio, required this.onStop});
-
-  final AudioService audio;
-  final VoidCallback onStop;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+    return Column(
       children: [
-        // Pause/Resume Button — driven by playingStream
-        StreamBuilder<bool>(
-          stream: audio.playingStream,
-          initialData: true,
-          builder: (context, snap) {
-            final isPlaying = snap.data ?? true;
-            return _LargeControlButton(
-              icon: isPlaying
-                  ? Icons.pause_circle_rounded
-                  : Icons.play_circle_rounded,
-              label: isPlaying ? 'Pause' : 'Resume',
-              onPressed: isPlaying
-                  ? () => audio.pause()
-                  : () => audio.play(),
-            );
-          },
+        // Title row with back button
+        Stack(
+          alignment: Alignment.center,
+          children: [
+            // Back button — left-aligned
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SizedBox(
+                width: 56,
+                height: 48,
+                child: IconButton(
+                  onPressed: onBack,
+                  icon: const Icon(Icons.chevron_left_rounded, size: 30),
+                  color: theme.colorScheme.onSurface,
+                  tooltip: 'Stop & Back',
+                ),
+              ),
+            ),
+            // Session title — centered, padded away from the back button
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 68),
+              child: Text(
+                title,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: AppTheme.textPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
+          ],
         ),
-
-        // Stop Button — uses the single guarded exit path
-        _LargeControlButton(
-          icon: Icons.stop_circle_rounded,
-          label: 'Stop',
-          onPressed: onStop,
-          color: Colors.redAccent,
+        const SizedBox(height: 2),
+        // Round indicator — cross-fades on change
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 350),
+          child: Text(
+            roundLabel,
+            key: ValueKey(roundLabel),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: AppTheme.textSecondary,
+              letterSpacing: 2.0,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ),
       ],
     );
   }
 }
 
-// ── Large Control Button ──────────────────────────────────────────────────────
+// ── Session Ring ──────────────────────────────────────────────────────────────
 
-class _LargeControlButton extends StatelessWidget {
-  const _LargeControlButton({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-    this.color,
+/// Circular progress ring with the countdown timer and phase label inside.
+///
+/// For finite sessions, [progress] drives a [CustomPainter] arc.
+/// For infinite sessions ([progress] == null), Flutter's built-in
+/// [CircularProgressIndicator] provides an indeterminate spinning state.
+class _SessionRing extends StatelessWidget {
+  const _SessionRing({
+    required this.progress,
+    required this.ringColor,
+    required this.displayTime,
+    required this.phase,
+    required this.showElapsed,
   });
 
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-  final Color? color;
+  /// 0.0–1.0 for finite sessions; null = infinite (indeterminate).
+  final double? progress;
+  final Color ringColor;
+  final Duration displayTime;
+  final String phase;
+
+  /// True for infinite sessions: displays "ELAPSED" label below the time.
+  final bool showElapsed;
+
+  static const double _strokeWidth = 10;
+
+  Widget _ring(BuildContext context) {
+    final trackColor =
+        Theme.of(context).colorScheme.surfaceContainerHighest;
+
+    if (progress == null) {
+      // Infinite: indeterminate spinner over a static track.
+      return Stack(
+        children: [
+          // Static track arc
+          SizedBox.expand(
+            child: CustomPaint(
+              painter: _RingPainter(
+                progress: 0,
+                ringColor: Colors.transparent,
+                trackColor: trackColor,
+                strokeWidth: _strokeWidth,
+              ),
+            ),
+          ),
+          // Spinning progress arc
+          SizedBox.expand(
+            child: Padding(
+              // CircularProgressIndicator strokes extend outside its bounds by
+              // strokeWidth/2; inset by that amount to align with the painter.
+              padding: const EdgeInsets.all(_strokeWidth / 2),
+              child: CircularProgressIndicator(
+                value: null,
+                strokeWidth: _strokeWidth,
+                color: AppTheme.textPrimary.withValues(alpha: 0.45),
+                backgroundColor: Colors.transparent,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Finite: smooth color transition when phase changes (warm-up ↔ action).
+    return TweenAnimationBuilder<Color?>(
+      tween: ColorTween(end: ringColor),
+      duration: const Duration(milliseconds: 400),
+      builder: (_, color, _) => CustomPaint(
+        painter: _RingPainter(
+          progress: progress!,
+          ringColor: color ?? AppTheme.textPrimary,
+          trackColor: trackColor,
+          strokeWidth: _strokeWidth,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final iconColor = color ?? theme.colorScheme.primary;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+    return Stack(
       children: [
-        SizedBox(
-          width: 96,
-          height: 96,
-          child: IconButton(
-            onPressed: onPressed,
-            icon: Icon(icon, size: 72, color: iconColor),
-            tooltip: label,
+        // Ring layer
+        SizedBox.expand(child: _ring(context)),
+        // Timer content centered inside the ring
+        Positioned.fill(
+          child: Padding(
+            // Keep text well clear of the stroke.
+            padding: const EdgeInsets.all(36),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Large countdown / count-up — FittedBox scales to fill width.
+                FittedBox(
+                  fit: BoxFit.contain,
+                  child: Text(
+                    _fmt(displayTime),
+                    style: theme.textTheme.displayLarge?.copyWith(
+                      color: AppTheme.textPrimary,
+                      // Fixed-width digits prevent jitter as numbers change.
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+                if (showElapsed)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      'ELAPSED',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppTheme.textSecondary,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 10),
+                // Phase label — cross-fades on phase change.
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  child: Text(
+                    phase,
+                    key: ValueKey(phase),
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: AppTheme.textSecondary,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: theme.textTheme.bodySmall?.copyWith(letterSpacing: 1),
+      ],
+    );
+  }
+}
+
+// ── Ring Painter ──────────────────────────────────────────────────────────────
+
+class _RingPainter extends CustomPainter {
+  const _RingPainter({
+    required this.progress,
+    required this.ringColor,
+    required this.trackColor,
+    this.strokeWidth = 10,
+  });
+
+  final double progress;
+  final Color ringColor;
+  final Color trackColor;
+  final double strokeWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    // Inset radius so the stroke stays entirely within the canvas bounds.
+    final radius = (size.shortestSide - strokeWidth) / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    // Track — full circle, always drawn.
+    canvas.drawArc(
+      rect,
+      0,
+      2 * math.pi,
+      false,
+      Paint()
+        ..color = trackColor
+        ..strokeWidth = strokeWidth
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round,
+    );
+
+    // Progress arc — clockwise from the 12-o'clock position.
+    final sweep = 2 * math.pi * progress.clamp(0.0, 1.0);
+    if (sweep > 0) {
+      canvas.drawArc(
+        rect,
+        -math.pi / 2,
+        sweep,
+        false,
+        Paint()
+          ..color = ringColor
+          ..strokeWidth = strokeWidth
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) =>
+      progress != old.progress ||
+      ringColor != old.ringColor ||
+      trackColor != old.trackColor;
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────────
+
+class _Controls extends StatelessWidget {
+  const _Controls({
+    required this.audio,
+    required this.isPlaying,
+    required this.onStop,
+  });
+
+  final AudioService audio;
+  final bool isPlaying;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // ── Stop (secondary, outlined circle) ─────────────────────────────
+        SizedBox.square(
+          dimension: 60,
+          child: Material(
+            color: cs.surface,
+            shape: CircleBorder(
+              side: BorderSide(
+                color: cs.outlineVariant,
+                width: 1.5,
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onStop,
+              child: Icon(
+                Icons.stop_rounded,
+                color: cs.onSurfaceVariant,
+                size: 26,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 36),
+        // ── Play / Pause (primary, brandAccent, 80×80) ────────────────────
+        SizedBox.square(
+          dimension: 80,
+          child: Material(
+            color: cs.primary,
+            shape: const CircleBorder(),
+            elevation: 0,
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: isPlaying ? audio.pause : audio.play,
+              child: Icon(
+                isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                color: cs.onPrimary,
+                size: 40,
+              ),
+            ),
+          ),
         ),
       ],
     );

@@ -11,12 +11,13 @@ import '../models/training_session.dart';
 
 // ── Background isolate helper ─────────────────────────────────────────────────
 
-/// Builds warm-up and loop source descriptors for exactly ONE pass each.
-/// Runs in a background isolate via [compute].
+/// Builds warm-up and loop source descriptors, with independent random cue
+/// selection for EACH loop pass. Runs in a background isolate via [compute].
 ///
 /// Returns a [Map] with:
 ///   'warmup'      — List of warmup descriptors (played once before any loop)
-///   'loop'        — List of loop descriptors for one pass
+///   'loopPasses'  — List of per-pass descriptor lists; each pass picks cues
+///                   independently so a different cue plays on every iteration
 ///   'repeatCount' — int
 ///   'isInfinite'  — bool
 ///
@@ -51,42 +52,53 @@ Map<String, dynamic> _buildSourceDescriptors(
     });
   }
 
-  // ── ONE pass of loop blocks ───────────────────────────────────────────────
-  final loopDescriptors = <Map<String, dynamic>>[];
-  for (var i = 0; i < loopBlocks.length; i++) {
-    final block = loopBlocks[i];
-    final isLastBlock = i == loopBlocks.length - 1;
+  // ── Per-pass loop descriptors with independent random cue picks ───────────
+  // For infinite sessions: pre-build 100 passes so enough cue variety exists
+  // before LoopMode.all wraps back around.
+  // For finite sessions: build exactly repeatCount passes (max 99 by clamp).
+  final passCount = session.isInfinite ? 100 : session.repeatCount;
+  final loopPasses = <List<Map<String, dynamic>>>[];
 
-    if (block is DelayBlock) {
-      loopDescriptors.add({
-        'type': 'silence',
-        'durationMs': block.duration.inMilliseconds,
-        'blockIndex': blockIndexById[block.id],
-      });
-    } else if (block is ActionBlock) {
-      final cue = block.pickCue(rng);
-      final path = cue.filePath;
-      if (path != null && path.isNotEmpty) {
-        loopDescriptors.add({
-          'type': cue.isCustom ? 'file' : 'asset',
-          'path': path,
+  for (var pass = 0; pass < passCount; pass++) {
+    final passDescriptors = <Map<String, dynamic>>[];
+    for (var i = 0; i < loopBlocks.length; i++) {
+      final block = loopBlocks[i];
+      final isLastBlock = i == loopBlocks.length - 1;
+
+      if (block is DelayBlock) {
+        passDescriptors.add({
+          'type': 'silence',
+          'durationMs': block.duration.inMilliseconds,
           'blockIndex': blockIndexById[block.id],
         });
-        // 300 ms gap prevents back-to-back cues sounding like one sound.
-        if (!isLastBlock) {
-          loopDescriptors.add({
-            'type': 'silence',
-            'durationMs': 300,
-            'blockIndex': null, // inter-cue gap, not a named block
+      } else if (block is ActionBlock) {
+        // Fresh random pick for every pass — each iteration plays a
+        // different cue from the pool, enabling unpredictable training.
+        final cue = block.pickCue(rng);
+        final path = cue.filePath;
+        if (path != null && path.isNotEmpty) {
+          passDescriptors.add({
+            'type': cue.isCustom ? 'file' : 'asset',
+            'path': path,
+            'blockIndex': blockIndexById[block.id],
           });
+          // 300 ms gap prevents back-to-back cues sounding like one sound.
+          if (!isLastBlock) {
+            passDescriptors.add({
+              'type': 'silence',
+              'durationMs': 300,
+              'blockIndex': null, // inter-cue gap, not a named block
+            });
+          }
         }
       }
     }
+    loopPasses.add(passDescriptors);
   }
 
   return {
     'warmup': warmupDescriptors,
-    'loop': loopDescriptors,
+    'loopPasses': loopPasses,
     'repeatCount': session.repeatCount,
     'isInfinite': session.isInfinite,
   };
@@ -145,6 +157,15 @@ class AudioService {
   /// background music (Spotify) only ducks while a cue is actually playing.
   List<bool> _isAudioItem = const [];
 
+  /// Number of playlist items belonging to the warm-up phase (played once).
+  /// Populated by [loadSession]. Used by the UI to detect which round is active.
+  int _warmupItemCount = 0;
+
+  /// Playlist index at which each loop pass begins.
+  /// `passStartIndices[0]` is the first loop-pass item (right after warm-up).
+  /// Populated by [loadSession].
+  List<int> _passStartIndices = const [];
+
   /// Retained reference to the OS audio session for dynamic focus management.
   AudioSession? _audioSession;
 
@@ -183,6 +204,14 @@ class AudioService {
   /// Null means the source is an inter-cue gap with no associated block.
   /// Always call after [loadSession] has completed.
   List<int?> get blockIndexMap => List.unmodifiable(_blockIndexMap);
+
+  /// Number of playlist items belonging to the one-shot warm-up phase.
+  /// Items at indices `0..<warmupItemCount` are warm-up silences.
+  int get warmupItemCount => _warmupItemCount;
+
+  /// Playlist index where each loop pass starts.
+  /// `passStartIndices[n]` is the first playlist index of round `n+1`.
+  List<int> get passStartIndices => List.unmodifiable(_passStartIndices);
 
   // ── Initialisation ──────────────────────────────────────────────────────────
 
@@ -248,13 +277,13 @@ class AudioService {
   /// The heavy descriptor-building work runs in a background isolate via
   /// [compute] to avoid blocking the main thread ([CORE-01]).
   ///
-  /// One pass of sources is built regardless of [TrainingSession.repeatCount].
-  /// Looping is handled natively:
-  ///   • infinite or repeatCount > 20 → [LoopMode.all] on one-pass playlist
-  ///     (playlist stays small; warm-up will also repeat, an acceptable
-  ///     trade-off at very high repeat counts).
-  ///   • repeatCount ≤ 20 → [LoopMode.off] with the loop pass duplicated
-  ///     inline (bounded source count; warm-up plays exactly once).
+  /// Each loop pass picks cues independently so a different cue plays on
+  /// every iteration when an ActionBlock has multiple sounds.
+  ///
+  ///   • finite sessions  → all [repeatCount] passes unrolled, [LoopMode.off]
+  ///                        (warm-up plays exactly once; max 99 passes × N blocks)
+  ///   • infinite sessions → 100 pre-built passes, [LoopMode.all]; the 100-pass
+  ///                         super-period provides good variety before repeating
   Future<void> loadSession(TrainingSession session) async {
     // Wait for init() to finish so the OS audio session is configured before
     // playback begins. No-op in the normal case (init completes in ~50ms,
@@ -269,35 +298,40 @@ class AudioService {
 
     final warmupDescs =
         (result['warmup'] as List).cast<Map<String, dynamic>>();
-    final loopDescs = (result['loop'] as List).cast<Map<String, dynamic>>();
-    final repeatCount = result['repeatCount'] as int;
+    final loopPassesRaw = result['loopPasses'] as List;
+    final loopPasses = loopPassesRaw
+        .map((p) => (p as List).cast<Map<String, dynamic>>())
+        .toList();
     final isInfinite = result['isInfinite'] as bool;
 
     final warmup = _convertDescriptors(warmupDescs);
-    final loop = _convertDescriptors(loopDescs);
+    // Convert each pass separately — different cue files per pass.
+    final convertedPasses = loopPasses.map(_convertDescriptors).toList();
 
-    // For infinite or large repeat counts, loop natively (LoopMode.all).
-    // The playlist index wraps back to 0 each iteration, so the one-pass
-    // blockIndexMap and isAudioItem arrays remain valid indefinitely.
-    //
-    // For small repeat counts, unroll loop passes inline (LoopMode.off) so
-    // the warm-up plays exactly once and audio-focus management is correct
-    // across all passes without any modular index arithmetic.
-    final useNativeLoop = isInfinite || repeatCount > 20;
+    // Finite sessions: all passes are unrolled inline (LoopMode.off) so the
+    // warm-up plays exactly once and audio-focus management is correct.
+    // Infinite sessions: 100 pre-built passes use LoopMode.all; the 100-pass
+    // "super-period" provides good cue variety before the cycle repeats.
+    final useNativeLoop = isInfinite;
 
-    if (useNativeLoop) {
-      _blockIndexMap = [...warmup.indexMap, ...loop.indexMap];
-      _isAudioItem = [...warmup.audioMap, ...loop.audioMap];
-    } else {
-      _blockIndexMap = [
-        ...warmup.indexMap,
-        for (var i = 0; i < repeatCount; i++) ...loop.indexMap,
-      ];
-      _isAudioItem = [
-        ...warmup.audioMap,
-        for (var i = 0; i < repeatCount; i++) ...loop.audioMap,
-      ];
+    _blockIndexMap = [
+      ...warmup.indexMap,
+      for (final p in convertedPasses) ...p.indexMap,
+    ];
+    _isAudioItem = [
+      ...warmup.audioMap,
+      for (final p in convertedPasses) ...p.audioMap,
+    ];
+
+    // Populate round-tracking helpers used by the active-session UI.
+    _warmupItemCount = warmup.sources.length;
+    var passStart = _warmupItemCount;
+    final passStarts = <int>[];
+    for (final p in convertedPasses) {
+      passStarts.add(passStart);
+      passStart += p.sources.length;
     }
+    _passStartIndices = passStarts;
 
     // Cancel any previous focus subscription before setting up a new one.
     await _indexSub?.cancel();
@@ -307,17 +341,15 @@ class AudioService {
       _audioSession?.setActive(isAudio);
     });
 
-    final allSources = useNativeLoop
-        ? [...warmup.sources, ...loop.sources]
-        : [
-            ...warmup.sources,
-            for (var i = 0; i < repeatCount; i++) ...loop.sources,
-          ];
+    final allSources = [
+      ...warmup.sources,
+      for (final p in convertedPasses) ...p.sources,
+    ];
 
     await _player.setLoopMode(useNativeLoop ? LoopMode.all : LoopMode.off);
     // preload: false — player is ready immediately; ExoPlayer buffers ahead
-    // naturally during playback. The playlist is now small (one pass) so
-    // setAudioSources resolves quickly regardless of session length.
+    // naturally during playback. Source count is bounded: max 99 passes × N
+    // blocks for finite, or 100 passes × N blocks for infinite.
     await _player.setAudioSources(allSources, preload: false);
   }
 

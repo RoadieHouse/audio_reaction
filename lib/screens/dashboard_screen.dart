@@ -19,6 +19,7 @@ class DashboardScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Sprint React')),
       body: Selector<SessionProvider, List<TrainingSession>>(
         selector: (_, p) => p.sessions,
+        shouldRebuild: (prev, next) => !identical(prev, next),
         builder: (context, sessions, _) {
           if (sessions.isEmpty) return const _EmptyState();
           return ListView.separated(
@@ -69,7 +70,9 @@ class _SessionTile extends StatelessWidget {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete'),
           ),
@@ -93,8 +96,8 @@ class _SessionTile extends StatelessWidget {
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
         decoration: BoxDecoration(
-          color: Colors.redAccent,
-          borderRadius: BorderRadius.circular(12),
+          color: theme.colorScheme.error,
+          borderRadius: BorderRadius.circular(16),
         ),
         child: const Icon(
           Icons.delete_outline_rounded,
@@ -105,7 +108,7 @@ class _SessionTile extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
           children: [

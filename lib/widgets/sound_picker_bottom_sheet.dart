@@ -78,7 +78,6 @@ class _SoundPickerSheetState extends State<_SoundPickerSheet> {
                 Tab(text: 'Default Sounds'),
                 Tab(text: 'My Recordings'),
               ],
-              labelStyle: const TextStyle(fontWeight: FontWeight.bold),
             ),
 
             Expanded(
@@ -166,7 +165,8 @@ class _SoundList extends StatelessWidget {
             decoration: BoxDecoration(
               color: theme.colorScheme.surface.withValues(alpha: 0.9),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+              border: Border.all(
+                  color: theme.colorScheme.outlineVariant),
             ),
             child: Row(
               children: [
@@ -256,7 +256,7 @@ class _RecordButtonState extends State<_RecordButton> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    const recordingColor = Colors.redAccent;
+    final recordingColor = theme.colorScheme.error;
     final idleColor = theme.colorScheme.primary;
 
     return Padding(
@@ -328,16 +328,15 @@ class _RecordButtonState extends State<_RecordButton> {
                           ? Icons.fiber_manual_record_rounded
                           : Icons.mic_rounded,
                       size: 28,
-                      color: _isRecording ? recordingColor : Colors.black,
+                      color: _isRecording ? recordingColor : theme.colorScheme.onPrimary,
                     ),
                   ),
                   const SizedBox(width: 10),
                   Text(
                     _isRecording ? 'Recording…' : 'Record New Cue',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
+                    style: theme.textTheme.labelLarge?.copyWith(
                       fontSize: 18,
-                      color: _isRecording ? recordingColor : Colors.black,
+                      color: _isRecording ? recordingColor : theme.colorScheme.onPrimary,
                     ),
                   ),
                 ],
@@ -411,12 +410,14 @@ class _DragHandle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 4),
-      child: Container(
-        width: 40,
-        height: 4,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.3),
-          borderRadius: BorderRadius.circular(2),
+      child: Center(
+        child: Container(
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.outlineVariant,
+            borderRadius: BorderRadius.circular(2),
+          ),
         ),
       ),
     );

@@ -1,16 +1,13 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../models/audio_cue.dart';
 import '../../models/sequence_block.dart';
-import '../../theme/app_theme.dart';
+import '../../theme/app_theme.dart'; // BlockColors ThemeExtension
 
 // ── WarmUpCard ────────────────────────────────────────────────────────────────
 
-/// Card for a [WarmUpBlock]. Exposes a numeric duration field.
-/// Callbacks are wired to the Provider in a future step.
+/// Minimalist card for a [WarmUpBlock].
+/// The warm-up is non-deletable, so [onDelete] is always null from the screen.
 class WarmUpCard extends StatelessWidget {
   const WarmUpCard({
     super.key,
@@ -21,17 +18,22 @@ class WarmUpCard extends StatelessWidget {
 
   final WarmUpBlock block;
   final ValueChanged<int>? onDurationChanged;
+
+  /// Always null for WarmUp — kept in the API for consistency.
   final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
-    return _BlockShell(
-      accentColor: AppTheme.blockWarmUp,
-      typeLabel: 'WARM-UP',
+    final blockColors = Theme.of(context).extension<BlockColors>()!;
+    return _BlockCard(
+      accentColor: blockColors.warmUp,
+      icon: Icons.timer_outlined,
+      label: 'Warm-up',
       onDelete: onDelete,
-      child: _DurationField(
+      trailing: _DurationStepper(
         initialSeconds: block.duration.inSeconds,
         onChanged: onDurationChanged,
+        min: 1,
       ),
     );
   }
@@ -39,7 +41,7 @@ class WarmUpCard extends StatelessWidget {
 
 // ── DelayCard ─────────────────────────────────────────────────────────────────
 
-/// Card for a [DelayBlock]. Exposes a numeric duration field.
+/// Minimalist card for a [DelayBlock].
 class DelayCard extends StatelessWidget {
   const DelayCard({
     super.key,
@@ -54,13 +56,16 @@ class DelayCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _BlockShell(
-      accentColor: AppTheme.blockDelay,
-      typeLabel: 'DELAY',
+    final blockColors = Theme.of(context).extension<BlockColors>()!;
+    return _BlockCard(
+      accentColor: blockColors.delay,
+      icon: Icons.hourglass_empty_rounded,
+      label: 'Delay',
       onDelete: onDelete,
-      child: _DurationField(
+      trailing: _DurationStepper(
         initialSeconds: block.duration.inSeconds,
         onChanged: onDurationChanged,
+        min: 1,
       ),
     );
   }
@@ -68,8 +73,8 @@ class DelayCard extends StatelessWidget {
 
 // ── ActionCard ────────────────────────────────────────────────────────────────
 
-/// Card for an [ActionBlock]. Shows the assigned [AudioCue] names as chips
-/// and an "Add Sound" button that triggers [onAddSound].
+/// Minimalist card for an [ActionBlock].
+/// Displays cues as deletable [Chip]s and an "+ Add Sound" action chip.
 class ActionCard extends StatelessWidget {
   const ActionCard({
     super.key,
@@ -83,17 +88,20 @@ class ActionCard extends StatelessWidget {
   final VoidCallback? onAddSound;
   final VoidCallback? onDelete;
 
-  /// Called when the user taps the ✕ on a cue chip. The caller is responsible
-  /// for guarding against removing the last cue.
+  /// Called when the user taps ✕ on a cue chip. The caller guards against
+  /// removing the last cue (must have ≥ 1 cue at all times).
   final ValueChanged<AudioCue>? onCueRemoved;
 
   @override
   Widget build(BuildContext context) {
-    return _BlockShell(
-      accentColor: AppTheme.blockAction,
-      typeLabel: 'ACTION',
+    final blockColors = Theme.of(context).extension<BlockColors>()!;
+    return _BlockCard(
+      accentColor: blockColors.action,
+      icon: Icons.bolt_rounded,
+      label: 'Action',
       onDelete: onDelete,
-      child: _CueRow(
+      // The cue chips and "+ Add Sound" sit below the title row.
+      child: _CueWrap(
         cues: block.audioCues,
         onAddSound: onAddSound,
         onCueRemoved: onCueRemoved,
@@ -102,226 +110,240 @@ class ActionCard extends StatelessWidget {
   }
 }
 
-// ── Shared Shell ──────────────────────────────────────────────────────────────
+// ── Shared Block Card Shell ───────────────────────────────────────────────────
 
-class _BlockShell extends StatelessWidget {
-  const _BlockShell({
+/// Elevation-free card with rounded corners and a subtle surface tint.
+/// Supports an optional [trailing] widget (inline duration field) and an
+/// optional [child] widget rendered below the title row (cue chips).
+class _BlockCard extends StatelessWidget {
+  const _BlockCard({
     required this.accentColor,
-    required this.typeLabel,
-    required this.child,
+    required this.icon,
+    required this.label,
     this.onDelete,
+    this.trailing,
+    this.child,
   });
 
   final Color accentColor;
-  final String typeLabel;
-  final Widget child;
+  final IconData icon;
+  final String label;
   final VoidCallback? onDelete;
+
+  /// Widget placed on the right side of the title row (e.g., duration field).
+  final Widget? trailing;
+
+  /// Widget rendered below the title row (e.g., cue chips for ActionCard).
+  final Widget? child;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border(left: BorderSide(color: accentColor, width: 3)),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _TypeLabel(label: typeLabel, color: accentColor),
-                  const SizedBox(height: 10),
-                  child,
-                ],
-              ),
-            ),
-            // Delete — 48×48 minimum tap target [UI-02]
-            SizedBox(
-              width: 48,
-              height: 48,
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(
-                  Icons.remove_circle_outline_rounded,
-                  color: theme.colorScheme.error.withValues(alpha: 0.7),
-                  size: 22,
-                ),
-                onPressed: onDelete,
-                tooltip: 'Remove block',
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Type Label Chip ───────────────────────────────────────────────────────────
-
-class _TypeLabel extends StatelessWidget {
-  const _TypeLabel({required this.label, required this.color});
-
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(4),
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
       ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.2,
-        ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Title row: icon + label + trailing + delete ─────────────────
+          Row(
+            children: [
+              // Block type icon
+              Icon(icon, color: accentColor, size: 20),
+              const SizedBox(width: 10),
+              // Label
+              Text(
+                label,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: accentColor,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              // Inline trailing (e.g., duration field)
+              if (trailing != null) ...[
+                const SizedBox(width: 12),
+                Expanded(child: trailing!),
+              ] else
+                const Spacer(),
+              // Delete button — 40×40 tap target
+              if (onDelete != null)
+                SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    iconSize: 20,
+                    icon: Icon(
+                      Icons.delete_outline_rounded,
+                      color: theme.colorScheme.onSurface.withValues(
+                        alpha: 0.35,
+                      ),
+                    ),
+                    onPressed: onDelete,
+                    tooltip: 'Remove block',
+                    style: IconButton.styleFrom(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                )
+              else
+                // Keep height consistent when delete is absent (WarmUp)
+                const SizedBox(width: 40, height: 40),
+            ],
+          ),
+          // ── Optional child section (cue chips) ──────────────────────────
+          if (child != null) ...[const SizedBox(height: 10), child!],
+        ],
       ),
     );
   }
 }
 
-// ── Duration Field ────────────────────────────────────────────────────────────
+// ── Duration Stepper ──────────────────────────────────────────────────────────
 
-/// Numeric [TextField] for seconds. Manages its own [TextEditingController]
-/// so WarmUpCard / DelayCard can remain [StatelessWidget].
-class _DurationField extends StatefulWidget {
-  const _DurationField({required this.initialSeconds, this.onChanged});
+/// Inline `−` / value / `+` stepper for setting a duration in whole seconds.
+///
+/// Stateless — the value lives in the model and is passed in as [initialSeconds].
+/// The `−` button is disabled at [min], making the floor self-documenting.
+class _DurationStepper extends StatelessWidget {
+  const _DurationStepper({
+    required this.initialSeconds,
+    required this.onChanged,
+    this.min = 1,
+  });
 
   final int initialSeconds;
   final ValueChanged<int>? onChanged;
-
-  @override
-  State<_DurationField> createState() => _DurationFieldState();
-}
-
-class _DurationFieldState extends State<_DurationField> {
-  late final TextEditingController _controller;
-  Timer? _debounce;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialSeconds.toString());
-  }
-
-  @override
-  void didUpdateWidget(_DurationField oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Sync the text when the block's duration changes externally (e.g., when
-    // loading an existing session for editing). Only update if the field is
-    // not currently focused so we don't interrupt the user mid-edit.
-    if (oldWidget.initialSeconds != widget.initialSeconds &&
-        !_controller.value.composing.isValid) {
-      _controller.text = widget.initialSeconds.toString();
-    }
-  }
-
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    _controller.dispose();
-    super.dispose();
-  }
+  final int min;
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: _controller,
-      keyboardType: TextInputType.number,
-      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-      style: Theme.of(context).textTheme.titleMedium,
-      decoration: const InputDecoration(
-        labelText: 'Duration (seconds)',
-        prefixIcon: Icon(Icons.timer_outlined, size: 20),
-        isDense: true,
-        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      ),
-      onChanged: (value) {
-        final seconds = int.tryParse(value);
-        if (seconds != null && seconds > 0) {
-          _debounce?.cancel();
-          _debounce = Timer(const Duration(milliseconds: 300), () {
-            widget.onChanged?.call(seconds);
-          });
-        }
-      },
+    final theme = Theme.of(context);
+    final atMin = initialSeconds <= min;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _StepBtn(
+          icon: Icons.remove_rounded,
+          onPressed: (atMin || onChanged == null)
+              ? null
+              : () => onChanged!(initialSeconds - 1),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          '$initialSeconds',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: theme.colorScheme.primary,
+          ),
+        ),
+        const SizedBox(width: 6),
+        _StepBtn(
+          icon: Icons.add_rounded,
+          onPressed: onChanged == null
+              ? null
+              : () => onChanged!(initialSeconds + 1),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          'sec',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+          ),
+        ),
+      ],
     );
   }
 }
 
-// ── Cue Row ───────────────────────────────────────────────────────────────────
+/// Compact 36×36 icon button used inside [_DurationStepper].
+class _StepBtn extends StatelessWidget {
+  const _StepBtn({required this.icon, this.onPressed});
 
-/// Displays the [AudioCue] pool as chips and an "Add Sound" icon button.
-class _CueRow extends StatelessWidget {
-  const _CueRow({required this.cues, this.onAddSound, this.onCueRemoved});
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 36,
+      height: 36,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        iconSize: 20,
+        icon: Icon(icon),
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          minimumSize: const Size(36, 36),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Cue Wrap ──────────────────────────────────────────────────────────────────
+
+/// Renders the [AudioCue] pool as deletable chips plus an "+ Add Sound" chip.
+class _CueWrap extends StatelessWidget {
+  const _CueWrap({required this.cues, this.onAddSound, this.onCueRemoved});
 
   final List<AudioCue> cues;
   final VoidCallback? onAddSound;
 
-  /// Called when the user taps ✕ on a chip. Null = chips are non-deletable.
+  /// Called when the user taps ✕ on a cue chip. Null = chips non-deletable.
   final ValueChanged<AudioCue>? onCueRemoved;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+    final actionColor = Theme.of(context).extension<BlockColors>()!.action;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
       children: [
-        Expanded(
-          child: cues.isEmpty
-              ? Text('No sounds — tap + to add', style: theme.textTheme.bodySmall)
-              : Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: cues
-                      .map(
-                        (c) => Chip(
-                          label: Text(c.name),
-                          labelStyle: const TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.blockAction,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          backgroundColor:
-                              AppTheme.blockAction.withValues(alpha: 0.12),
-                          side: BorderSide.none,
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          onDeleted: onCueRemoved != null
-                              ? () => onCueRemoved!(c)
-                              : null,
-                          deleteIconColor:
-                              AppTheme.blockAction.withValues(alpha: 0.7),
-                        ),
-                      )
-                      .toList(),
-                ),
-        ),
-        // Add Sound — 48×48 tap target [UI-02]
-        SizedBox(
-          width: 48,
-          height: 48,
-          child: IconButton(
-            padding: EdgeInsets.zero,
-            icon: const Icon(
-              Icons.add_circle_outline_rounded,
-              color: AppTheme.blockAction,
-              size: 24,
+        // Existing cue chips with delete ✕
+        ...cues.map(
+          (c) => Chip(
+            label: Text(c.name),
+            labelStyle: TextStyle(
+              fontSize: 12,
+              color: actionColor,
+              fontWeight: FontWeight.bold,
             ),
-            onPressed: onAddSound,
-            tooltip: 'Add sound',
+            backgroundColor: actionColor.withValues(alpha: 0.10),
+            side: BorderSide.none,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            onDeleted: onCueRemoved != null ? () => onCueRemoved!(c) : null,
+            deleteIconColor: actionColor.withValues(alpha: 0.6),
           ),
+        ),
+        // "+ Add Sound" action chip
+        ActionChip(
+          avatar: Icon(
+            Icons.add_rounded,
+            size: 16,
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+          ),
+          label: Text(
+            'Add Sound',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+            ),
+          ),
+          backgroundColor: theme.colorScheme.surfaceContainerHighest,
+          side: BorderSide(color: theme.colorScheme.outline),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          // TODO: Open sound_picker_bottom_sheet.dart
+          onPressed: onAddSound,
         ),
       ],
     );
