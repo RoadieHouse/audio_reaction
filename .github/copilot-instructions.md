@@ -1,4 +1,4 @@
-# Project: Sprint React
+# Project: Audio Reaction Training
 # Context: Universal AI Agent Instructions
 
 You are assisting an expert developer in building a Flutter application for reactive sprint training. The app delivers unpredictable audio cues (e.g., "Left", "Right") while the user is sprinting. 

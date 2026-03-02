@@ -18,9 +18,21 @@ const List<AudioCue> kDefaultAudioCues = [
     isCustom: false,
   ),
   AudioCue(
+    id: 'chime',
+    name: 'Chime',
+    filePath: 'assets/sounds/chime.wav',
+    isCustom: false,
+  ),
+  AudioCue(
     id: 'countdown',
     name: 'Countdown',
     filePath: 'assets/sounds/countdown.wav',
+    isCustom: false,
+  ),
+  AudioCue(
+    id: 'drum_roll',
+    name: 'Drum Roll',
+    filePath: 'assets/sounds/drum_roll.wav',
     isCustom: false,
   ),
   AudioCue(
@@ -66,9 +78,15 @@ const List<AudioCue> kDefaultAudioCues = [
     isCustom: false,
   ),
   AudioCue(
-    id: 'short_beep',
-    name: 'Short Beep',
-    filePath: 'assets/sounds/short_beep.wav',
+    id: 'thunk',
+    name: 'Thunk',
+    filePath: 'assets/sounds/thunk.wav',
+    isCustom: false,
+  ),
+  AudioCue(
+    id: 'truck_horn',
+    name: 'Truck Horn',
+    filePath: 'assets/sounds/truck_horn.wav',
     isCustom: false,
   ),
 ];

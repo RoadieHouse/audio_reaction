@@ -7,7 +7,6 @@ import 'active_session_screen.dart';
 import 'create_session_screen.dart';
 
 /// Entry screen: shows the library of saved training sessions.
-/// Provides access to start (play) a session and create a new one.
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
@@ -15,31 +14,65 @@ class DashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Sprint React')),
       body: Selector<SessionProvider, List<TrainingSession>>(
         selector: (_, p) => p.sessions,
         shouldRebuild: (prev, next) => !identical(prev, next),
         builder: (context, sessions, _) {
-          if (sessions.isEmpty) return const _EmptyState();
-          return ListView.separated(
-            padding: const EdgeInsets.all(20),
-            itemCount: sessions.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
-            itemBuilder: (context, index) =>
-                _SessionTile(session: sessions[index]),
+          return CustomScrollView(
+            slivers: [
+              SliverAppBar(
+                expandedHeight: 100,
+                pinned: true,
+                backgroundColor: theme.scaffoldBackgroundColor,
+                surfaceTintColor: Colors.transparent,
+                flexibleSpace: FlexibleSpaceBar(
+                  titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
+                  title: Text(
+                    'Training',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  background: ColoredBox(
+                    color: theme.scaffoldBackgroundColor,
+                  ),
+                ),
+              ),
+              if (sessions.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _EmptyState(),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _SessionCard(session: sessions[index]),
+                      ),
+                      childCount: sessions.length,
+                    ),
+                  ),
+                ),
+            ],
           );
         },
       ),
       floatingActionButton: _CreateSessionFab(),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 }
 
-// ── Session Tile ──────────────────────────────────────────────────────────────
+// ── Session Card ──────────────────────────────────────────────────────────────
 
-class _SessionTile extends StatelessWidget {
-  const _SessionTile({required this.session});
+class _SessionCard extends StatelessWidget {
+  const _SessionCard({required this.session});
 
   final TrainingSession session;
 
@@ -51,13 +84,11 @@ class _SessionTile extends StatelessWidget {
     );
   }
 
-  // FIX 5: tap text area to edit.
   void _onEdit(BuildContext context) {
     context.read<SessionProvider>().editExistingSession(session);
     Navigator.pushNamed(context, CreateSessionScreen.routeName);
   }
 
-  // FIX 5: swipe-to-delete with confirmation.
   Future<bool> _confirmDelete(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -94,93 +125,94 @@ class _SessionTile extends StatelessWidget {
           context.read<SessionProvider>().deleteSession(session.id),
       background: Container(
         alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
+        padding: const EdgeInsets.only(right: 24),
         decoration: BoxDecoration(
           color: theme.colorScheme.error,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
         ),
-        child: const Icon(
+        child: Icon(
           Icons.delete_outline_rounded,
-          color: Colors.white,
-          size: 28,
+          color: theme.colorScheme.onError,
+          size: 32,
         ),
       ),
-      child: Container(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Row(
-          children: [
-            // ── Text content (tappable → edit) ──────────────────────────
-            Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => _onEdit(context),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 18,
-                  ),
+      child: Card(
+        child: InkWell(
+          onTap: () => _onEdit(context),
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // ── Left: title + metadata pills ──────────────────────────
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         session.title,
-                        style: theme.textTheme.titleMedium,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 4),
-                      Row(
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
                         children: [
-                          Icon(
-                            Icons.timer_outlined,
-                            size: 14,
-                            color: theme.textTheme.bodySmall?.color,
+                          // Duration / Infinite pill
+                          if (session.isInfinite)
+                            _MetaPill(
+                              icon: Icons.all_inclusive_rounded,
+                              label: 'Infinite',
+                            )
+                          else
+                            _MetaPill(
+                              icon: Icons.timer_outlined,
+                              label: _formatDuration(session.totalDuration),
+                            ),
+                          // Actions pill
+                          _MetaPill(
+                            icon: Icons.bolt_outlined,
+                            label: session.actionCount == 1
+                                ? '1 action'
+                                : '${session.actionCount} actions',
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _formatDuration(session.totalDuration),
-                            style: theme.textTheme.bodySmall,
-                          ),
-                          const SizedBox(width: 16),
-                          Icon(
-                            Icons.layers_outlined,
-                            size: 14,
-                            color: theme.textTheme.bodySmall?.color,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${session.actionCount} actions',
-                            style: theme.textTheme.bodySmall,
-                          ),
+                          // Rounds pill (only for finite multi-round sessions)
+                          if (!session.isInfinite && session.repeatCount > 1)
+                            _MetaPill(
+                              icon: Icons.repeat_rounded,
+                              label: '${session.repeatCount} rnds',
+                            ),
                         ],
                       ),
                     ],
                   ),
                 ),
-              ),
-            ),
-
-            // ── Play Button (64×64 tap target) ───────────────────────────
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: SizedBox(
-                width: 64,
-                height: 64,
-                child: IconButton(
-                  onPressed: () => _onPlay(context),
-                  icon: Icon(
-                    Icons.play_circle_filled_rounded,
-                    color: theme.colorScheme.primary,
-                    size: 40,
+                const SizedBox(width: 16),
+                // ── Right: play button ─────────────────────────────────────
+                GestureDetector(
+                  onTap: () => _onPlay(context),
+                  child: Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: theme.colorScheme.primary,
+                    ),
+                    child: Icon(
+                      Icons.play_arrow_rounded,
+                      size: 32,
+                      color: theme.colorScheme.onPrimary,
+                    ),
                   ),
-                  tooltip: 'Start Session',
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -192,6 +224,40 @@ class _SessionTile extends StatelessWidget {
     if (m == 0) return '$s sec';
     if (s == 0) return '$m min';
     return '$m min $s sec';
+  }
+}
+
+// ── Metadata pill ─────────────────────────────────────────────────────────────
+
+class _MetaPill extends StatelessWidget {
+  const _MetaPill({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: muted),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -222,24 +288,30 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.directions_run_rounded,
-            size: 72,
-            color: theme.colorScheme.primary.withValues(alpha: 0.4),
+            Icons.timer_outlined,
+            size: 80,
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.2),
           ),
-          const SizedBox(height: 16),
-          Text('No sessions yet', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 20),
+          Text(
+            'No sessions yet.',
+            style: theme.textTheme.titleMedium?.copyWith(color: muted),
+          ),
           const SizedBox(height: 8),
           Text(
-            'Tap + to create your first sprint session.',
-            style: theme.textTheme.bodySmall,
+            'Create your first reaction training.',
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
           ),
         ],
       ),
     );
   }
 }
+

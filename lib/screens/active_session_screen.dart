@@ -219,6 +219,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
               _Header(
                 title: widget.session?.title ?? 'Session',
                 roundLabel: _roundLabel,
+                isInfinite: widget.session?.isInfinite ?? false,
                 onBack: _guardedExit,
               ),
               const SizedBox(height: 16),
@@ -241,6 +242,7 @@ class _ActiveSessionScreenState extends State<ActiveSessionScreen> {
                             displayTime: _displayTime,
                             phase: _phaseLabel(block),
                             showElapsed: widget.session?.isInfinite ?? false,
+                            isPlaying: _isPlaying,
                           ),
                         ),
                       );
@@ -269,11 +271,13 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.title,
     required this.roundLabel,
+    required this.isInfinite,
     required this.onBack,
   });
 
   final String title;
   final String roundLabel;
+  final bool isInfinite;
   final VoidCallback onBack;
 
   @override
@@ -299,7 +303,7 @@ class _Header extends StatelessWidget {
                 ),
               ),
             ),
-            // Session title — centered, padded away from the back button
+            // Session title — centered, padded away from both sides
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 68),
               child: Text(
@@ -313,10 +317,33 @@ class _Header extends StatelessWidget {
                 maxLines: 1,
               ),
             ),
+            // ∞ badge — right-aligned, mirrors the back button position
+            if (isInfinite)
+              Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 16),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(
+                      Icons.all_inclusive_rounded,
+                      size: 13,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
         const SizedBox(height: 2),
-        // Round indicator — cross-fades on change
+        // Round indicator — standalone centered text, no extra elements
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 350),
           child: Text(
@@ -339,15 +366,16 @@ class _Header extends StatelessWidget {
 /// Circular progress ring with the countdown timer and phase label inside.
 ///
 /// For finite sessions, [progress] drives a [CustomPainter] arc.
-/// For infinite sessions ([progress] == null), Flutter's built-in
-/// [CircularProgressIndicator] provides an indeterminate spinning state.
-class _SessionRing extends StatelessWidget {
+/// For infinite sessions ([progress] == null), a slow-rotating short arc
+/// provides a calm "in-progress" indication without the frantic default spinner.
+class _SessionRing extends StatefulWidget {
   const _SessionRing({
     required this.progress,
     required this.ringColor,
     required this.displayTime,
     required this.phase,
     required this.showElapsed,
+    required this.isPlaying,
   });
 
   /// 0.0–1.0 for finite sessions; null = infinite (indeterminate).
@@ -359,17 +387,65 @@ class _SessionRing extends StatelessWidget {
   /// True for infinite sessions: displays "ELAPSED" label below the time.
   final bool showElapsed;
 
+  /// When false the slow-rotation arc is paused.
+  final bool isPlaying;
+
+  @override
+  State<_SessionRing> createState() => _SessionRingState();
+}
+
+class _SessionRingState extends State<_SessionRing>
+    with SingleTickerProviderStateMixin {
+  /// Drives the slow arc rotation for infinite sessions.
+  AnimationController? _rotCtrl;
+
   static const double _strokeWidth = 10;
 
-  Widget _ring(BuildContext context) {
-    final trackColor =
-        Theme.of(context).colorScheme.surfaceContainerHighest;
+  @override
+  void initState() {
+    super.initState();
+    _startOrStopRotation();
+  }
 
-    if (progress == null) {
-      // Infinite: indeterminate spinner over a static track.
+  @override
+  void didUpdateWidget(_SessionRing old) {
+    super.didUpdateWidget(old);
+    if (old.progress != widget.progress) _startOrStopRotation();
+    // Pause/resume the arc when the session is paused/resumed.
+    if (old.isPlaying != widget.isPlaying && _rotCtrl != null) {
+      widget.isPlaying ? _rotCtrl!.repeat() : _rotCtrl!.stop();
+    }
+  }
+
+  void _startOrStopRotation() {
+    if (widget.progress == null) {
+      // Infinite session — spin a short arc very slowly (7 s per rotation).
+      _rotCtrl ??= AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 7000),
+      );
+      // Only repeat if the session is currently playing.
+      if (widget.isPlaying) _rotCtrl!.repeat();
+    } else {
+      _rotCtrl?.stop();
+      _rotCtrl?.dispose();
+      _rotCtrl = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _rotCtrl?.dispose();
+    super.dispose();
+  }
+
+  Widget _ring(BuildContext context) {
+    final trackColor = Theme.of(context).colorScheme.surfaceContainerHighest;
+
+    if (widget.progress == null) {
+      // Infinite: static track + slow-rotating ~75° arc (calm sweep).
       return Stack(
         children: [
-          // Static track arc
           SizedBox.expand(
             child: CustomPaint(
               painter: _RingPainter(
@@ -380,17 +456,17 @@ class _SessionRing extends StatelessWidget {
               ),
             ),
           ),
-          // Spinning progress arc
-          SizedBox.expand(
-            child: Padding(
-              // CircularProgressIndicator strokes extend outside its bounds by
-              // strokeWidth/2; inset by that amount to align with the painter.
-              padding: const EdgeInsets.all(_strokeWidth / 2),
-              child: CircularProgressIndicator(
-                value: null,
-                strokeWidth: _strokeWidth,
-                color: AppTheme.textPrimary.withValues(alpha: 0.45),
-                backgroundColor: Colors.transparent,
+          AnimatedBuilder(
+            animation: _rotCtrl!,
+            builder: (_, _) => SizedBox.expand(
+              child: CustomPaint(
+                painter: _ArcSweepPainter(
+                  startAngle:
+                      -math.pi / 2 + _rotCtrl!.value * 2 * math.pi,
+                  sweepAngle: math.pi / 2.4, // ≈ 75°
+                  color: AppTheme.textPrimary.withValues(alpha: 0.35),
+                  strokeWidth: _strokeWidth,
+                ),
               ),
             ),
           ),
@@ -400,11 +476,11 @@ class _SessionRing extends StatelessWidget {
 
     // Finite: smooth color transition when phase changes (warm-up ↔ action).
     return TweenAnimationBuilder<Color?>(
-      tween: ColorTween(end: ringColor),
+      tween: ColorTween(end: widget.ringColor),
       duration: const Duration(milliseconds: 400),
       builder: (_, color, _) => CustomPaint(
         painter: _RingPainter(
-          progress: progress!,
+          progress: widget.progress!,
           ringColor: color ?? AppTheme.textPrimary,
           trackColor: trackColor,
           strokeWidth: _strokeWidth,
@@ -432,7 +508,7 @@ class _SessionRing extends StatelessWidget {
                 FittedBox(
                   fit: BoxFit.contain,
                   child: Text(
-                    _fmt(displayTime),
+                    _fmt(widget.displayTime),
                     style: theme.textTheme.displayLarge?.copyWith(
                       color: AppTheme.textPrimary,
                       // Fixed-width digits prevent jitter as numbers change.
@@ -440,7 +516,7 @@ class _SessionRing extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (showElapsed)
+                if (widget.showElapsed)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
@@ -456,8 +532,8 @@ class _SessionRing extends StatelessWidget {
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 300),
                   child: Text(
-                    phase,
-                    key: ValueKey(phase),
+                    widget.phase,
+                    key: ValueKey(widget.phase),
                     style: theme.textTheme.titleSmall?.copyWith(
                       color: AppTheme.textSecondary,
                       letterSpacing: 1.5,
@@ -531,6 +607,47 @@ class _RingPainter extends CustomPainter {
       progress != old.progress ||
       ringColor != old.ringColor ||
       trackColor != old.trackColor;
+}
+
+// ── Arc Sweep Painter (infinite sessions) ────────────────────────────────────
+
+/// Draws a single short arc at [startAngle] with the given [sweepAngle].
+/// Used for the calm slow-rotating indicator in infinite-round sessions.
+class _ArcSweepPainter extends CustomPainter {
+  const _ArcSweepPainter({
+    required this.startAngle,
+    required this.sweepAngle,
+    required this.color,
+    this.strokeWidth = 10,
+  });
+
+  final double startAngle;
+  final double sweepAngle;
+  final Color color;
+  final double strokeWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.shortestSide - strokeWidth) / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    canvas.drawArc(
+      rect,
+      startAngle,
+      sweepAngle,
+      false,
+      Paint()
+        ..color = color
+        ..strokeWidth = strokeWidth
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ArcSweepPainter old) =>
+      startAngle != old.startAngle || color != old.color;
 }
 
 // ── Controls ──────────────────────────────────────────────────────────────────

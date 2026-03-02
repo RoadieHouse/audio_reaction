@@ -54,7 +54,7 @@ class SprintReactApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp(
-        title: 'Sprint React',
+        title: 'Audio Reaction Training',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
         initialRoute: DashboardScreen.routeName,

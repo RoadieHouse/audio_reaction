@@ -1,37 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Centralized theme definition for Sprint React.
+/// Centralized theme definition for Audio Reaction Training.
 /// All widgets reference Theme.of(context) — no hardcoded colors.
 abstract class AppTheme {
   // ── Design Tokens (Premium Minimalist Palette) ───────────────────────────
 
   // A modern, energetic "Volt" accent. Used sparingly for FABs and active states.
-  static const Color brandAccent = Color(0xFFD4FF26);
+  static const Color brandAccent = Color.fromARGB(255, 10, 211, 187);
 
-  // Deep Zinc 950. Richer and more professional than pure harsh black.
-  static const Color bgBase = Color(0xFF09090B);
+  static const Color bgBase = Color(0xFF0B0F14);
+  static const Color bgSurface = Color(0xFF121821);
+  static const Color bgSurfaceElevated = Color(0xFF18202A);
 
-  // Zinc 900. Subtle elevation for cards and bottom sheets.
-  static const Color bgSurface = Color(0xFF18181B);
+  static const Color textPrimary = Color(0xFFE6EDF3);
+  static const Color textSecondary = Color(0xFF8B98A5);
 
-  // Zinc 800. Used for chips or inputs sitting inside a bgSurface card.
-  static const Color bgSurfaceElevated = Color(0xFF27272A);
+  static const Color outline = Color(0xFF202938);
 
-  // Zinc 50. Crisp off-white. Prevents the "bleeding" effect of pure white text.
-  static const Color textPrimary = Color(0xFFFAFAFA);
+  static const Color error = Color(0xFFFF5D5D);
 
-  // Zinc 400. Highly readable grey for secondary text and icons.
-  static const Color textSecondary = Color(0xFFA1A1AA);
-
-  static const Color error = Color(0xFFEF4444); // Softer, modern red
-
-  // Refined, muted block colors.
-  // Used only for tiny UI hints (like a subtle dot or left-border).
-  static const Color blockWarmUp = Color(0xFF60A5FA); // Soft Blue
-  static const Color blockLoop = Color(0xFFFBBF24); // Soft Amber
+  static const Color blockWarmUp = Color(0xFF4F7CFF);
+  static const Color blockLoop = Color(0xFFF59E0B);
   static const Color blockAction = brandAccent;
-  static const Color blockDelay = textSecondary;
+  static const Color blockDelay = Color(0xFF6B7280);
 
   // ── Theme Extension for block colors ─────────────────────────────────────
 

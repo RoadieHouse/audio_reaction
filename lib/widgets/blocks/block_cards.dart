@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/audio_cue.dart';
@@ -139,66 +140,88 @@ class _BlockCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // ── Title row: icon + label + trailing + delete ─────────────────
-          Row(
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          border: Border.all(
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.06),
+            width: 1,
+          ),
+        ),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Block type icon
-              Icon(icon, color: accentColor, size: 20),
-              const SizedBox(width: 10),
-              // Label
-              Text(
-                label,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: accentColor,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
+              // 3px solid accent strip — primary block-type differentiator
+              Container(width: 3, color: accentColor),
+              // Card body
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 12, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // ── Label row ────────────────────────────────────────
+                      Row(
+                        children: [
+                          Icon(icon, color: accentColor, size: 14),
+                          const SizedBox(width: 6),
+                          Text(
+                            label.toUpperCase(),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: accentColor,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (onDelete != null)
+                            SizedBox(
+                              width: 32,
+                              height: 32,
+                              child: IconButton(
+                                padding: EdgeInsets.zero,
+                                iconSize: 16,
+                                icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: theme.colorScheme.onSurfaceVariant
+                                      .withValues(alpha: 0.4),
+                                ),
+                                onPressed: onDelete,
+                                tooltip: 'Remove block',
+                                style: IconButton.styleFrom(
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                              ),
+                            )
+                          else
+                            // Keep layout stable when no delete (WarmUp)
+                            const SizedBox(width: 32, height: 32),
+                        ],
+                      ),
+                      // ── Thin surface divider ─────────────────────────────
+                      const SizedBox(height: 10),
+                      Container(height: 1, color: AppTheme.bgSurfaceElevated),
+                      const SizedBox(height: 12),
+                      // ── Content: stepper (WarmUp/Delay) or chips (Action)
+                      if (trailing != null)
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [trailing!],
+                        ),
+                      ?child,
+                    ],
+                  ),
                 ),
               ),
-              // Inline trailing (e.g., duration field)
-              if (trailing != null) ...[
-                const SizedBox(width: 12),
-                Expanded(child: trailing!),
-              ] else
-                const Spacer(),
-              // Delete button — 40×40 tap target
-              if (onDelete != null)
-                SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    iconSize: 20,
-                    icon: Icon(
-                      Icons.delete_outline_rounded,
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.35,
-                      ),
-                    ),
-                    onPressed: onDelete,
-                    tooltip: 'Remove block',
-                    style: IconButton.styleFrom(
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
-                )
-              else
-                // Keep height consistent when delete is absent (WarmUp)
-                const SizedBox(width: 40, height: 40),
             ],
           ),
-          // ── Optional child section (cue chips) ──────────────────────────
-          if (child != null) ...[const SizedBox(height: 10), child!],
-        ],
+        ),
       ),
     );
   }
@@ -223,65 +246,208 @@ class _DurationStepper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final atMin = initialSeconds <= min;
-
     return Row(
       mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        _StepBtn(
+        _CircleStepBtn(
           icon: Icons.remove_rounded,
           onPressed: (atMin || onChanged == null)
               ? null
               : () => onChanged!(initialSeconds - 1),
         ),
-        const SizedBox(width: 6),
-        Text(
-          '$initialSeconds',
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: theme.colorScheme.primary,
+        const SizedBox(width: 20),
+        // Tapping the number opens a scroll-wheel picker
+        GestureDetector(
+          onTap: onChanged == null ? null : () => _showScrollPicker(context),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$initialSeconds',
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              const Text(
+                'seconds',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w400,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(width: 6),
-        _StepBtn(
+        const SizedBox(width: 20),
+        _CircleStepBtn(
           icon: Icons.add_rounded,
           onPressed: onChanged == null
               ? null
               : () => onChanged!(initialSeconds + 1),
         ),
-        const SizedBox(width: 6),
-        Text(
-          'sec',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-          ),
-        ),
       ],
+    );
+  }
+
+  void _showScrollPicker(BuildContext context) {
+    // Cap the max at a reasonable ceiling; 600 s = 10 min is plenty for warm-ups.
+    const int maxSeconds = 600;
+    final clampedMin = min.clamp(1, maxSeconds);
+    final range = maxSeconds - clampedMin + 1; // total items
+    final initialIndex =
+        (initialSeconds.clamp(clampedMin, maxSeconds)) - clampedMin;
+
+    final controller = FixedExtentScrollController(initialItem: initialIndex);
+    int selectedValue = initialSeconds.clamp(clampedMin, maxSeconds);
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          decoration: BoxDecoration(
+            color: AppTheme.bgSurface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ── Handle ─────────────────────────────────────────────────
+                const SizedBox(height: 12),
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.textSecondary,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // ── Header ─────────────────────────────────────────────────
+                Text(
+                  'Set Duration',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: AppTheme.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // ── Wheel ──────────────────────────────────────────────────
+                SizedBox(
+                  height: 200,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Selection highlight band
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: AppTheme.bgSurfaceElevated,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          margin: const EdgeInsets.symmetric(horizontal: 40),
+                        ),
+                      ),
+                      // Picker
+                      CupertinoPicker(
+                        scrollController: controller,
+                        itemExtent: 44,
+                        diameterRatio: 1.4,
+                        squeeze: 1.0,
+                        selectionOverlay: const SizedBox.shrink(),
+                        onSelectedItemChanged: (i) {
+                          selectedValue = i + clampedMin;
+                        },
+                        children: List.generate(range, (i) {
+                          final secs = i + clampedMin;
+                          return Center(
+                            child: Text(
+                              '$secs',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textPrimary,
+                                fontFamily: 'Inter',
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // ── Confirm button ─────────────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.brandAccent,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size(double.infinity, 52),
+                      shape: const StadiumBorder(),
+                      elevation: 0,
+                    ),
+                    onPressed: () {
+                      onChanged!(selectedValue);
+                      Navigator.of(ctx).pop();
+                    },
+                    child: const Text(
+                      'Confirm',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
 
-/// Compact 36×36 icon button used inside [_DurationStepper].
-class _StepBtn extends StatelessWidget {
-  const _StepBtn({required this.icon, this.onPressed});
+/// Compact circular step button (30×30) used inside [_DurationStepper].
+class _CircleStepBtn extends StatelessWidget {
+  const _CircleStepBtn({required this.icon, this.onPressed});
 
   final IconData icon;
   final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 36,
-      height: 36,
-      child: IconButton(
-        padding: EdgeInsets.zero,
-        iconSize: 20,
-        icon: Icon(icon),
-        onPressed: onPressed,
-        style: IconButton.styleFrom(
-          minimumSize: const Size(36, 36),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    final enabled = onPressed != null;
+    return Material(
+      color: AppTheme.bgSurfaceElevated,
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onPressed,
+        child: SizedBox(
+          width: 30,
+          height: 30,
+          child: Icon(
+            icon,
+            size: 16,
+            color: enabled
+                ? AppTheme.textPrimary
+                : AppTheme.textSecondary.withValues(alpha: 0.3),
+          ),
         ),
       ),
     );
@@ -290,7 +456,9 @@ class _StepBtn extends StatelessWidget {
 
 // ── Cue Wrap ──────────────────────────────────────────────────────────────────
 
-/// Renders the [AudioCue] pool as deletable chips plus an "+ Add Sound" chip.
+/// Two-column layout:
+/// Left  — cue chips stacked vertically.
+/// Right — vertically-centered "+" add button.
 class _CueWrap extends StatelessWidget {
   const _CueWrap({required this.cues, this.onAddSound, this.onCueRemoved});
 
@@ -303,49 +471,80 @@ class _CueWrap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final actionColor = Theme.of(context).extension<BlockColors>()!.action;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 6,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Existing cue chips with delete ✕
-        ...cues.map(
-          (c) => Chip(
-            label: Text(c.name),
-            labelStyle: TextStyle(
-              fontSize: 12,
-              color: actionColor,
-              fontWeight: FontWeight.bold,
-            ),
-            backgroundColor: actionColor.withValues(alpha: 0.10),
-            side: BorderSide.none,
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            onDeleted: onCueRemoved != null ? () => onCueRemoved!(c) : null,
-            deleteIconColor: actionColor.withValues(alpha: 0.6),
+        // ── Left column: stacked cue chips ──────────────────────────────
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (int i = 0; i < cues.length; i++) ...[
+                Chip(
+                  label: Text(cues[i].name),
+                  labelStyle: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: 12,
+                    color: theme.colorScheme.onSurface,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                  side: BorderSide.none,
+                  shape: const StadiumBorder(),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 0,
+                  ),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onDeleted: onCueRemoved != null
+                      ? () => onCueRemoved!(cues[i])
+                      : null,
+                  deleteIcon: const Icon(Icons.close_rounded, size: 14),
+                  deleteIconColor: theme.colorScheme.onSurfaceVariant,
+                ),
+                if (i < cues.length - 1) const SizedBox(height: 6),
+              ],
+            ],
           ),
         ),
-        // "+ Add Sound" action chip
-        ActionChip(
-          avatar: Icon(
-            Icons.add_rounded,
-            size: 16,
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-          ),
-          label: Text(
-            'Add Sound',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-            ),
-          ),
-          backgroundColor: theme.colorScheme.surfaceContainerHighest,
-          side: BorderSide(color: theme.colorScheme.outline),
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          // TODO: Open sound_picker_bottom_sheet.dart
-          onPressed: onAddSound,
+
+        // ── Right column: fixed 56px width, button centered within it ───
+        SizedBox(
+          width: 56,
+          child: Center(child: _AddCueButton(onTap: onAddSound)),
         ),
       ],
+    );
+  }
+}
+
+/// Small circular "+" button for adding a cue to an action block.
+class _AddCueButton extends StatelessWidget {
+  const _AddCueButton({this.onTap});
+
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppTheme.bgSurfaceElevated,
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: const SizedBox(
+          width: 36,
+          height: 36,
+          child: Center(
+            child: Icon(
+              Icons.add_rounded,
+              size: 18,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

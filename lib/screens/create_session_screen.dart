@@ -29,48 +29,64 @@ class _CreateSessionScreenState extends State<CreateSessionScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Create Session'),
+          // Title removed — the H1 name field acts as the page heading.
           actions: [
-            TextButton(
-              onPressed: () {
-                final provider = context.read<SessionProvider>();
-                if (provider.draftSession?.title.trim().isEmpty ?? true) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Please enter a session name.'),
-                    ),
-                  );
-                  return;
-                }
-                // Set saving flag BEFORE saveDraft() so the body widget
-                // renders a blank container instead of the empty-draft
-                // state during the exit animation — eliminates the flash.
-                setState(() => _saving = true);
-                provider.saveDraft();
-                Navigator.pop(context);
-              },
-              child: const Text('Save'),
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: FilledButton(
+                onPressed: () {
+                  final provider = context.read<SessionProvider>();
+                  if (provider.draftSession?.title.trim().isEmpty ?? true) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please enter a session name.'),
+                      ),
+                    );
+                    return;
+                  }
+                  setState(() => _saving = true);
+                  provider.saveDraft();
+                  Navigator.pop(context);
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.brandAccent,
+                  foregroundColor: Colors.black,
+                  minimumSize: const Size(64, 34),
+                  maximumSize: const Size(120, 34),
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  shape: const StadiumBorder(),
+                  elevation: 0,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  textStyle: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
+                child: const Text('Save'),
+              ),
             ),
           ],
         ),
         body: _CreateSessionBody(saving: _saving),
-        // Large, premium circular FAB
+        // Circle FAB with signature lime glow halo
         floatingActionButton: _saving
             ? null
-            : SizedBox(
-                height: 64, // Explicitly larger than the default 56px FAB
+            : Container(
                 width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.brandAccent.withValues(alpha: 0.15),
+                      blurRadius: 14,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
                 child: FloatingActionButton(
                   onPressed: () => _showAddBlockSheet(context),
-                  elevation: 0, // Keeps the modern, flat aesthetic
-                  highlightElevation: 0,
-                  shape:
-                      const CircleBorder(), // Forces a perfect circle, overriding any theme defaults
-                  child: const Icon(
-                    Icons.add_rounded,
-                    size:
-                        36, // Scaled up icon to perfectly balance the 64px circle
-                  ),
+                  child: const Icon(Icons.add_rounded, size: 28),
                 ),
               ),
         floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
@@ -104,7 +120,7 @@ class _AddBlockSheet extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
       ),
       padding: EdgeInsets.fromLTRB(
         24,
@@ -188,10 +204,10 @@ class _AddBlockOption extends StatelessWidget {
     final theme = Theme.of(context);
     return Material(
       color: color.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Row(
@@ -344,7 +360,22 @@ class _BlockTimelineState extends State<_BlockTimeline> {
             hasScrollBody: false,
             child: _EmptyTimelineState(),
           )
-        else
+        else ...[
+          // "SEQUENCE" eyebrow label above the block list
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+              child: Text(
+                'SEQUENCE',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.6,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ),
+          ),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 120),
             sliver: SliverList.builder(
@@ -352,10 +383,10 @@ class _BlockTimelineState extends State<_BlockTimeline> {
               itemBuilder: (context, index) => _BlockRow(
                 key: ValueKey(widget.blocks[index].id),
                 block: widget.blocks[index],
-                isLast: index == widget.blocks.length - 1,
               ),
             ),
           ),
+        ],
       ],
     );
   }
@@ -370,53 +401,44 @@ class _SessionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Large borderless title input acting as the page header.
+          // ── H1-style editable page heading ─────────────────────────────
           TextField(
             controller: titleController,
             onChanged: (v) =>
                 context.read<SessionProvider>().updateDraftTitle(v),
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0,
+            style: const TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+              letterSpacing: -0.5,
             ),
-            // Explicitly override the global theme for this specific input
-            decoration: const InputDecoration(
-              hintText: 'Enter Session Name…',
-              filled: false, // Removes the grey background fill
-              border: InputBorder.none, // Removes default borders
-              enabledBorder:
-                  InputBorder.none, // Ensures no border when inactive
-              focusedBorder:
-                  InputBorder.none, // STOPS the brandAccent focus border!
-              contentPadding:
-                  EdgeInsets.zero, // Keeps it perfectly aligned to the left
-              isDense: true, // Makes the input field wrap the text tightly
+            decoration: InputDecoration(
+              hintText: 'Untitled Session',
+              hintStyle: TextStyle(
+                fontSize: 32,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.5,
+                color: AppTheme.textPrimary.withValues(alpha: 0.20),
+              ),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              filled: false,
+              contentPadding: EdgeInsets.zero,
+              isDense: true,
             ),
             textCapitalization: TextCapitalization.words,
           ),
 
           const SizedBox(height: 28),
 
-          // Divider between title and loop settings
-          const Divider(height: 1),
-
-          const SizedBox(height: 16),
-
-          // Loop settings row
+          // ── Pill-shaped Rounds + Infinite row ──────────────────────────
           const _LoopControlsRow(),
-
-          const SizedBox(height: 16),
-
-          const Divider(height: 1),
-
-          const SizedBox(height: 8),
         ],
       ),
     );
@@ -436,69 +458,89 @@ class _LoopControlsRow extends StatelessWidget {
     final repeatCount = context.select<SessionProvider, int>(
       (p) => p.draftSession?.repeatCount ?? 1,
     );
-    final theme = Theme.of(context);
-    final dimColor = theme.colorScheme.onSurface.withValues(alpha: 0.5);
 
-    return Row(
-      children: [
-        // ── Rounds stepper ─────────────────────────────────────────────
-        Text(
-          'Rounds',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: isInfinite ? theme.disabledColor : dimColor,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(width: 8),
-        _StepperButton(
-          icon: Icons.remove_rounded,
-          onPressed: (isInfinite || repeatCount <= 1)
-              ? null
-              : () => context.read<SessionProvider>().updateDraftRepeatCount(
-                  repeatCount - 1,
+    return Container(
+      height: 52,
+      decoration: BoxDecoration(
+        color: AppTheme.bgSurface,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // ── Rounds label + stepper ──────────────────────────────────────
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Rounds',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isInfinite
+                      ? AppTheme.textSecondary
+                      : AppTheme.textPrimary,
                 ),
-        ),
-        const SizedBox(width: 4),
-        SizedBox(
-          width: 28,
-          child: Text(
-            '$repeatCount',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: isInfinite
-                  ? theme.disabledColor
-                  : theme.colorScheme.primary,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-        const SizedBox(width: 4),
-        _StepperButton(
-          icon: Icons.add_rounded,
-          onPressed: isInfinite
-              ? null
-              : () => context.read<SessionProvider>().updateDraftRepeatCount(
-                  repeatCount + 1,
+              ),
+              const SizedBox(width: 12),
+              _StepperButton(
+                icon: Icons.remove_rounded,
+                onPressed: (isInfinite || repeatCount <= 1)
+                    ? null
+                    : () => context
+                          .read<SessionProvider>()
+                          .updateDraftRepeatCount(repeatCount - 1),
+              ),
+              SizedBox(
+                width: 28,
+                child: Text(
+                  '$repeatCount',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: isInfinite
+                        ? AppTheme.textSecondary
+                        : AppTheme.textPrimary,
+                  ),
                 ),
-        ),
-
-        const Spacer(),
-
-        // ── Infinite toggle ─────────────────────────────────────────────
-        Text(
-          '∞  Infinite',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: isInfinite ? theme.colorScheme.primary : dimColor,
-            fontWeight: FontWeight.w600,
+              ),
+              _StepperButton(
+                icon: Icons.add_rounded,
+                onPressed: isInfinite
+                    ? null
+                    : () => context
+                          .read<SessionProvider>()
+                          .updateDraftRepeatCount(repeatCount + 1),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(width: 4),
-        Switch(
-          value: isInfinite,
-          onChanged: (v) =>
-              context.read<SessionProvider>().updateDraftIsInfinite(v),
-        ),
-      ],
+
+          // ── ∞ icon + switch grouped ─────────────────────────────────────
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.all_inclusive_rounded,
+                size: 20,
+                color: isInfinite
+                    ? AppTheme.textPrimary
+                    : AppTheme.textSecondary,
+              ),
+              Transform.scale(
+                scale: 0.78,
+                alignment: Alignment.centerRight,
+                child: Switch(
+                  value: isInfinite,
+                  onChanged: (v) =>
+                      context.read<SessionProvider>().updateDraftIsInfinite(v),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -532,56 +574,15 @@ class _StepperButton extends StatelessWidget {
 // ── Block Row (timeline connector + card dispatch) ────────────────────────────
 
 class _BlockRow extends StatelessWidget {
-  const _BlockRow({super.key, required this.block, required this.isLast});
+  const _BlockRow({super.key, required this.block});
 
   final SequenceBlock block;
-  final bool isLast;
 
   @override
   Widget build(BuildContext context) {
-    final accent = _accentFor(context, block);
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // ── Thin timeline rail (left 24 px) ─────────────────────────────
-          SizedBox(
-            width: 24,
-            child: Column(
-              children: [
-                // Dot
-                Container(
-                  width: 10,
-                  height: 10,
-                  margin: const EdgeInsets.only(top: 20),
-                  decoration: BoxDecoration(
-                    color: accent,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                // Connector line to next block
-                if (!isLast)
-                  Expanded(
-                    child: Center(
-                      child: Container(
-                        width: 1.5,
-                        color: accent.withValues(alpha: 0.25),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          // ── Card (right portion) ─────────────────────────────────────────
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _cardFor(context, block),
-            ),
-          ),
-        ],
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: _cardFor(context, block),
     );
   }
 
@@ -633,14 +634,6 @@ class _BlockRow extends StatelessWidget {
       );
     }
     return const SizedBox.shrink();
-  }
-
-  Color _accentFor(BuildContext context, SequenceBlock block) {
-    final blockColors = Theme.of(context).extension<BlockColors>()!;
-    if (block is WarmUpBlock) return blockColors.warmUp;
-    if (block is DelayBlock) return blockColors.delay;
-    if (block is ActionBlock) return blockColors.action;
-    return blockColors.delay;
   }
 }
 

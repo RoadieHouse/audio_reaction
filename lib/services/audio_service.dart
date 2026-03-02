@@ -175,6 +175,14 @@ class AudioService {
   /// Subscription to preview player state; releases audio focus on completion.
   StreamSubscription<PlayerState>? _previewStateSub;
 
+  /// Tracks the ID of the cue currently being previewed.
+  /// Null when no preview is active.
+  String? _currentPreviewCueId;
+
+  /// Broadcast controller that emits the previewing cue's ID (or null on stop).
+  final StreamController<String?> _previewCueIdController =
+      StreamController<String?>.broadcast();
+
   /// Completer that resolves when [init] has finished configuring the OS audio
   /// session. [loadSession] awaits this to guard against the rare fast-launch
   /// race where the user taps play before audio-session setup has completed.
@@ -212,6 +220,25 @@ class AudioService {
   /// Playlist index where each loop pass starts.
   /// `passStartIndices[n]` is the first playlist index of round `n+1`.
   List<int> get passStartIndices => List.unmodifiable(_passStartIndices);
+
+  // ── Preview streams ─────────────────────────────────────────────────────────
+
+  /// Real-time playback position of the preview player.
+  Stream<Duration> get previewPositionStream => _previewPlayer.positionStream;
+
+  /// Duration of the currently previewing item (null while loading).
+  Stream<Duration?> get previewDurationStream => _previewPlayer.durationStream;
+
+  /// Whether the preview player is currently playing.
+  Stream<bool> get previewPlayingStream => _previewPlayer.playingStream;
+
+  /// Emits the [AudioCue.id] of the cue being previewed, or null when idle.
+  /// New subscribers receive the latest value via [currentPreviewingCueId].
+  Stream<String?> get previewingCueIdStream => _previewCueIdController.stream;
+
+  /// Synchronous read of the currently previewing cue ID (null = none).
+  /// Use as `initialData` for [StreamBuilder] so new subscribers are in sync.
+  String? get currentPreviewingCueId => _currentPreviewCueId;
 
   // ── Initialisation ──────────────────────────────────────────────────────────
 
@@ -370,30 +397,47 @@ class AudioService {
 
   /// Plays [cue] once for preview. Uses a separate player so the session
   /// player is never interrupted. Any in-progress preview is stopped first.
+  ///
+  /// Emits [cue.id] on [previewingCueIdStream] when playback starts, and
+  /// null when it completes naturally.
   Future<void> previewCue(AudioCue cue) async {
     try {
       await _previewPlayer.stop();
       // Cancel any previous completion subscription before starting a new preview.
       await _previewStateSub?.cancel();
       _previewStateSub = null;
+      // Notify UI that this cue is now previewing.
+      _currentPreviewCueId = cue.id;
+      if (!_previewCueIdController.isClosed) _previewCueIdController.add(cue.id);
       final source = _sourceForCue(cue);
       await _previewPlayer.setAudioSource(source, preload: true);
       await _previewPlayer.play();
-      // Release audio focus once the preview finishes naturally so background
-      // music (Spotify, Apple Music) stops being ducked immediately after the
-      // cue ends — not held until the next explicit stop() call.
+      // Release audio focus and reset cue-ID stream when preview ends naturally.
       _previewStateSub = _previewPlayer.playerStateStream.listen((state) {
         if (state.processingState == ProcessingState.completed) {
           _audioSession?.setActive(false);
+          _currentPreviewCueId = null;
+          if (!_previewCueIdController.isClosed) _previewCueIdController.add(null);
         }
       });
     } catch (e) {
+      _currentPreviewCueId = null;
+      if (!_previewCueIdController.isClosed) _previewCueIdController.add(null);
       assert(() {
         // ignore: avoid_print
         print('[AudioService] previewCue() failed: $e');
         return true;
       }());
     }
+  }
+
+  /// Stops any in-progress preview and emits null on [previewingCueIdStream].
+  Future<void> stopPreview() async {
+    await _previewStateSub?.cancel();
+    _previewStateSub = null;
+    await _previewPlayer.stop();
+    _currentPreviewCueId = null;
+    if (!_previewCueIdController.isClosed) _previewCueIdController.add(null);
   }
 
   // ── Disposal ────────────────────────────────────────────────────────────────
@@ -406,6 +450,7 @@ class AudioService {
     await _audioSession?.setActive(false);
     await _player.dispose();
     await _previewPlayer.dispose();
+    await _previewCueIdController.close();
   }
 
   // ── Private Helpers ─────────────────────────────────────────────────────────

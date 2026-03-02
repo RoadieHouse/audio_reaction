@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Sprint React needs microphone access to record custom audio cues for your training sessions.</string>
+	<string>Audio Reaction Training needs microphone access to record custom audio cues for your training sessions.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

@@ -1,47 +1,38 @@
-# audio_reaction
+# Audio Reaction Training
 
-A new Flutter project.
+A simple Flutter app built to solve a personal training problem: getting randomised audio cues to react to during sprints and agility drills — without interrupting the music you're already listening to.
 
-## Getting Started
+The idea is simple. You set up a session with a warm-up, a series of action blocks (each with one or more audio cues that fire randomly), delays between them, and a number of rounds. Hit play, pocket your phone, and the app fires cues through your earphones while Spotify (or whatever) keeps playing in the background. You react to the sound. That's it.
 
-This project is a starting point for a Flutter application.
+---
 
-A few resources to get you started if this is your first Flutter project:
+## The Problem It Solves
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+Most reaction training tools either require a partner, use visual cues that demand you watch a screen, cost money or pause your music. This app fires audio cues — directional calls, beeps, custom recordings — unpredictably, so you actually have to listen and react rather than anticipate. It mixes its audio on top of your music session using the correct iOS/Android audio session configuration so nothing gets interrupted.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+---
 
-```
+## Features
 
-├─ lib
-│  ├─ data
-│  │  └─ default_sounds.dart
-│  ├─ main.dart
-│  ├─ models
-│  │  ├─ audio_cue.dart
-│  │  ├─ sequence_block.dart
-│  │  └─ training_session.dart
-│  ├─ providers
-│  │  └─ session_provider.dart
-│  ├─ screens
-│  │  ├─ active_session_screen.dart
-│  │  ├─ create_session_screen.dart
-│  │  └─ dashboard_screen.dart
-│  ├─ services
-│  │  ├─ audio_service.dart
-│  │  ├─ recording_service.dart
-│  │  └─ storage_service.dart
-│  ├─ theme
-│  │  └─ app_theme.dart
-│  └─ widgets
-│     ├─ blocks
-│     │  └─ block_cards.dart
-│     └─ sound_picker_bottom_sheet.dart
+- **Session builder** — compose a training sequence from warm-up, delay, and action blocks
+- **Action blocks** — assign one or more audio cues per block; one fires at random each round
+- **Custom recordings** — record your own cues directly in the app (e.g. "left", "right", "go")
+- **Bundled sounds** — a library of default cues (beeps, chimes, bells, etc.) ready to use
+- **Rounds & infinite mode** — run a fixed number of rounds or loop indefinitely
+- **Plays over background music** — Spotify, Apple Music, etc. keep playing uninterrupted (only ducking)
+- **Screen-lock safe** — the sequence continues when the device is locked or in your pocket
+- **Swipe to delete, tap to edit** — simple session management on the home screen
 
+---
 
-```
+## Ideas & Future Work
+
+### 1. Randomised delay ranges
+Instead of a fixed delay between blocks, let the user set a minimum and maximum. The app would pick a random duration within that range each round, making the timing genuinely unpredictable and much harder to anticipate.
+
+### 2. Visual drill patterns (drawing / images per session)
+Let users attach a diagram to a session — drawn directly in the app or uploaded as an image. The classic use case: a half-circle of cones where each cone is labelled with a number or colour, and each label maps to a specific audio cue. The athlete sees the layout once before the session starts, then reacts purely by sound during training.
+
+### 3. Text-to-speech cue generation
+Instead of recording yourself saying "left" or "cone 3", let the app generate the audio from typed text using the device's text-to-speech engine. Faster setup, consistent pronunciation, and useful for anyone who doesn't want to record their own voice.
+(**Not tested on a physical Apple device but considered during development.**)
