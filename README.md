@@ -28,11 +28,14 @@ Most reaction training tools either require a partner, use visual cues that dema
 ## Ideas & Future Work
 
 ### 1. Randomised delay ranges
-Instead of a fixed delay between blocks, let the user set a minimum and maximum. The app would pick a random duration within that range each round, making the timing genuinely unpredictable and much harder to anticipate.
+Next tp a fixed delay between blocks, let the user be able to set a minimum and maximum. The app can pick a random duration within that range each round, making the timing genuinely unpredictable and much harder to anticipate.
 
 ### 2. Visual drill patterns (drawing / images per session)
-Let users attach a diagram to a session — drawn directly in the app or uploaded as an image. The classic use case: a half-circle of cones where each cone is labelled with a number or colour, and each label maps to a specific audio cue. The athlete sees the layout once before the session starts, then reacts purely by sound during training.
+Let users attach a diagram to a session — drawn directly in the app or uploaded as an image (e.g. [flutter_drawing_board](https://pub.dev/packages/flutter_drawing_board). Example use case: a half-circle of cones where each cone is labelled with a number or colour, and each label maps to a specific audio cue. The athlete sees the layout once before the session starts, then reacts purely by sound during training.
 
 ### 3. Text-to-speech cue generation
-Instead of recording yourself saying "left" or "cone 3", let the app generate the audio from typed text using the device's text-to-speech engine. Faster setup, consistent pronunciation, and useful for anyone who doesn't want to record their own voice.
+Instead of recording yourself saying "left" or "3", let the app generate the audio from typed text using a text-to-speech model. Faster setup, consistent pronunciation, and useful for anyone who doesn't want to record their own voice.
+
+---
+
 (**Not tested on a physical Apple device but considered during development.**)
